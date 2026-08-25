@@ -1,0 +1,1046 @@
+/* =========================================================
+   小煎蛋的工作台  —  个人工作台 (本地优先 / PWA)
+   数据全部存于浏览器 localStorage；可选接入同步服务实现多端实时同步
+   ========================================================= */
+'use strict';
+
+/* ---------- 基础工具 ---------- */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const KEY = 'xiaojidan_workbench_v1';
+
+const todayStr = (d = new Date()) => {
+  const z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+};
+const startOfDay = d => { d = new Date(d); d.setHours(0, 0, 0, 0); return d; };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 1800);
+}
+function download(filename, text, type = 'text/markdown') {
+  const blob = new Blob([text], { type });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click();
+}
+let lastReport = { text: '', name: '' };
+
+/* ---------- 示例数据 ---------- */
+const SAMPLE_RECIPES = [
+  { id: 'r1', name: '西兰花炒虾仁', meal: 'lunch', emoji: '🥦', time: 15, tags: ['带饭友好', '高蛋白', '低卡'],
+    ing: ['虾仁 200g', '西兰花 1 颗', '蒜末', '盐/黑胡椒'], steps: ['虾仁用盐料酒腌 10 分钟', '西兰花焯水 1 分钟', '热油爆香蒜末，下虾仁炒变色', '倒入西兰花翻炒，调味出锅'] },
+  { id: 'r2', name: '番茄鸡蛋面', meal: 'dinner', emoji: '🍜', time: 12, tags: ['快手', '暖胃'],
+    ing: ['挂面 1 把', '番茄 2 个', '鸡蛋 2 个', '葱花'], steps: ['番茄切块炒出汁', '加水煮开下面', '淋蛋液成蛋花', '盐调味撒葱花'] },
+  { id: 'r3', name: '燕麦莓果碗', meal: 'breakfast', emoji: '🥣', time: 5, tags: ['免煮', '膳食纤维'],
+    ing: ['燕麦 50g', '牛奶/酸奶', '蓝莓/草莓', '坚果'], steps: ['燕麦加牛奶浸泡', '铺上莓果与坚果', '可提前一晚冷藏隔夜燕麦'] },
+  { id: 'r4', name: '鸡胸藜麦沙拉', meal: 'lunch', emoji: '🥗', time: 18, tags: ['带饭友好', '减脂', '高蛋白'],
+    ing: ['鸡胸肉 1 块', '藜麦 60g', '黄瓜/小番茄', '油醋汁'], steps: ['藜麦煮熟沥干', '鸡胸煎熟切块', '蔬菜切丁', '拌入油醋汁'] },
+  { id: 'r5', name: '蒸蛋羹', meal: 'breakfast', emoji: '🥚', time: 12, tags: ['低脂', '快手'],
+    ing: ['鸡蛋 2 个', '温水 1.5 倍', '生抽/香油'], steps: ['蛋液加温水打匀过筛', '盖保鲜膜扎孔', '中火蒸 10 分钟', '淋生抽香油'] },
+  { id: 'r6', name: '蒜香西兰花鸡丁', meal: 'dinner', emoji: '🍗', time: 20, tags: ['下饭', '家常'],
+    ing: ['鸡腿肉 1 块', '西兰花', '蒜', '蚝油'], steps: ['鸡肉切丁腌制', '西兰花焯水', '炒香蒜末下鸡丁', '加蚝油与西兰花翻炒'] },
+  { id: 'r7', name: '牛油果吐司', meal: 'breakfast', emoji: '🥑', time: 6, tags: ['免煮', '优质脂肪'],
+    ing: ['全麦吐司', '牛油果', '鸡蛋(可水煮)', '黑胡椒'], steps: ['吐司烤脆', '牛油果压泥抹上', '铺水煮蛋切片', '撒黑胡椒'] },
+  { id: 'r8', name: '韩式辣白菜豆腐汤', meal: 'dinner', emoji: '🍲', time: 18, tags: ['暖身', '开胃'],
+    ing: ['嫩豆腐 1 盒', '辣白菜', '五花肉/午餐肉', '大葱'], steps: ['五花肉煸出油', '加辣白菜炒香', '加水与豆腐块煮开', '撒葱花'] },
+  { id: 'r9', name: '全麦三明治', meal: 'breakfast', emoji: '🥪', time: 8, tags: ['免煮', '便携'],
+    ing: ['全麦面包', '鸡蛋', '生菜', '番茄', '芝士'], steps: ['鸡蛋煮熟切片', '面包铺生菜番茄蛋芝士', '对半切好带走'] },
+  { id: 'r10', name: '凉拌鸡丝荞麦面', meal: 'lunch', emoji: '🍝', time: 15, tags: ['带饭友好', '低卡', '清爽'],
+    ing: ['荞麦面', '鸡胸丝', '黄瓜丝', '芝麻酱/醋'], steps: ['荞麦面煮熟过凉', '拌入鸡丝黄瓜丝', '调芝麻醋汁拌匀'] },
+  { id: 'r11', name: '番茄龙利鱼', meal: 'dinner', emoji: '🐟', time: 20, tags: ['高蛋白', '清淡'],
+    ing: ['龙利鱼', '番茄', '豆腐', '金针菇'], steps: ['鱼柳切块腌制', '番茄炒出汁加水', '下鱼块豆腐菇煮熟'] },
+  { id: 'r12', name: '香蕉燕麦杯', meal: 'breakfast', emoji: '🍌', time: 4, tags: ['免煮', '膳食纤维'],
+    ing: ['即食燕麦', '香蕉', '酸奶', '奇亚籽'], steps: ['杯底铺燕麦', '叠香蕉片与酸奶', '撒奇亚籽即食'] },
+];
+
+const SAMPLE_KNOWLEDGE = [
+  { id: 'k1', tag: '入门', title: '复利是什么', body: '利息再投资产生“利滚利”。长期定投的核心动力，越早开始优势越大。' },
+  { id: 'k2', tag: '工具', title: '基金 vs 股票', body: '基金由经理分散投资一篮子资产，波动小于单只股票，适合没时间盯盘的小白。' },
+  { id: 'k3', tag: '风险', title: '资产配置', body: '把资金按风险分散到货币/债券/权益类，目标是在能承受的波动下争取收益。' },
+  { id: 'k4', tag: '指标', title: '通胀与购买力', body: '钱放活期会被通胀悄悄稀释，理解 CPI 有助于判断“钱该放哪”。' },
+  { id: 'k5', tag: '工具', title: '指数基金(ETF)', body: '跟踪沪深300、标普500等指数，费用低、透明，常被推荐为小白起点。' },
+  { id: 'k6', tag: '纪律', title: '定投策略', body: '固定时间固定金额买入，平摊成本、克服追涨杀跌，贵在坚持。' },
+  { id: 'k7', tag: '风险', title: '风险承受力', body: '投资前先问：这笔钱多久不用？亏 20% 会不会睡不着？答案决定仓位。' },
+  { id: 'k8', tag: '趋势', title: '看懂财经日历', body: '关注央行利率、CPI、非农等数据发布日，市场常在这些节点波动。' },
+];
+
+const SAMPLE_FRESH = [
+  { id: 'f1', cat: '穿搭', title: '美拉德风穿搭', desc: '棕咖色系叠穿，温暖高级，秋冬通勤也好看。', hot: '🔥 1.2w 讨论', link: 'https://www.douyin.com/search/%E7%BE%8E%E6%8B%89%E5%BE%B7%E9%A3%8E%E7%A9%BF%E6%90%AD' },
+  { id: 'f2', cat: '餐厅', title: '城市 B istro 小酒馆', desc: '轻松氛围 + 人均百元的好拍照西餐，适合周末约朋友。', hot: '⭐ 新开', link: 'https://www.bilibili.com/search/all?keyword=%E5%B0%8F%E9%85%92%E9%A6%86' },
+  { id: 'f3', cat: '游玩', title: '城市骑行路线', desc: '沿河绿道 + 咖啡店打卡，半天就能充好电。', hot: '', link: 'https://www.bilibili.com/search/all?keyword=%E5%9F%8E%E5%B8%82%E9%AA%91%E8%A1%8C' },
+  { id: 'f4', cat: '潮流', title: 'City Walk 城市漫游', desc: '不赶景点，慢慢逛老街与独立书店，最近很火。', hot: '🔥 热门', link: 'https://www.xiaohongshu.com/search_result?keyword=citywalk' },
+  { id: 'f5', cat: '理财投资', title: '闲钱自动攒计划', desc: '工资到账自动转一笔到货基，先储蓄后消费。', hot: '', link: 'https://www.bilibili.com/search/all?keyword=%E8%87%AA%E5%8A%A8%E6%94%AF%E5%87%BA' },
+  { id: 'f6', cat: '副业', title: '知识付费小课', desc: '把你的编辑/外语专长做成 9.9 小课，边际成本低。', hot: '💡 可尝试', link: 'https://www.bilibili.com/search/all?keyword=%E7%9F%A5%E8%AF%86%E4%BB%98%E8%B4%B9' },
+  { id: 'f7', cat: '娱乐', title: '沉浸式解压视频', desc: 'asmr / 整理收纳类视频，睡前放松很解压。', hot: '', link: 'https://www.bilibili.com/search/all?keyword=asmr%E8%A7%A3%E5%8E%8B' },
+  { id: 'f8', cat: '潮流', title: '多巴胺穿搭', desc: '高饱和撞色，元气满满，适合拍照出片。', hot: '🔥 热门', link: 'https://www.douyin.com/search/%E5%A4%9A%E5%B7%B4%E8%83%BA%E7%A9%BF%E6%90%AD' },
+  { id: 'f9', cat: '副业', title: 'AI 提效接单', desc: '用 AI 做PPT/排版/翻译接小单，外企背景很吃香。', hot: '💡 新思路', link: 'https://www.bilibili.com/search/all?keyword=AI%E6%8E%A5%E5%8D%95' },
+  { id: 'f10', cat: '游玩', title: '近郊露营一日', desc: '租装备当天往返，成本可控，周末微度假。', hot: '', link: 'https://www.bilibili.com/search/all?keyword=%E8%BF%91%E9%83%8A%E9%9C%B2%E8%90%A5' },
+];
+
+const EN_PLAN = [
+  { type: 'listen', icon: '👂', cls: 'listen', title: '听力 · 15min',
+    desc: '会议录音精听：先盲听抓大意，再对照脚本跟读，最后听写关键句。',
+    steps: ['盲听 1 遍，抓大意', '看脚本跟读 2 遍', '遮住脚本听写关键句', '对照原文修正'],
+    material: 'A: Shall we get started? Thanks everyone for joining.\nB: Sure. First, the Q3 editorial calendar came in slightly behind target.\nA: Right — the main delay was the peer-review turnaround. Let’s tighten that.\nB: Agreed. I’ll circle back with the authors by Thursday.' },
+  { type: 'speak', icon: '🗣️', cls: 'speak', title: '口语 · 影子跟读',
+    desc: '跟读原生句子 3 遍，再自己录/说 1 分钟今日总结。',
+    steps: ['逐句跟读 3 遍', '合上稿自己说 1 遍', '挑 1 句用在今日总结'],
+    material: '1) Thanks for joining — let’s quickly run through today’s three points.\n2) Sorry, could you say that again a bit slower?\n3) That’s a good point — building on that, I’d suggest we…\n4) Great, I’ll follow up with a short summary by end of day.' },
+  { type: 'vocab', icon: '📝', cls: 'vocab', title: '词汇 · 10 词',
+    desc: '今天的 10 个外企地道表达，过一遍 + 自测 + 标记已掌握。',
+    steps: ['过一遍 10 个表达', '遮盖中文自测', '标记已掌握的'],
+    material: '' },
+  { type: 'meet', icon: '💼', cls: 'meet', title: '会议 · 模拟开场',
+    desc: '读熟开场/总结模板，用你自己的项目练一句，设想一个提问。',
+    steps: ['读熟开场模板', '用自己项目练一句', '设想 1 个提问并准备回答'],
+    material: '【开场】Hi everyone, thanks for joining. Let’s quickly run through today’s three points.\n【接话】That’s a good point — building on that, I’d suggest we…\n【没听清】Sorry, could you say that again a bit slower?\n【收尾】Great, I’ll circle back with a summary by EOD. Anything before we wrap up?' },
+];
+// 外企地道表达（按日期轮换取 10 个）
+const EN_VOCAB = [
+  { id: 'v1', en: 'peer review', cn: '同行评审', ex: 'The paper is under peer review.' },
+  { id: 'v2', en: 'turnaround', cn: '处理时长 / 周转', ex: 'We need a faster turnaround.' },
+  { id: 'v3', en: 'deadline', cn: '截止日期', ex: 'The deadline is this Friday.' },
+  { id: 'v4', en: 'follow up', cn: '跟进', ex: 'I’ll follow up by EOD.' },
+  { id: 'v5', en: 'circle back', cn: '稍后回来谈', ex: 'Let’s circle back to this later.' },
+  { id: 'v6', en: 'align', cn: '对齐 / 达成一致', ex: 'Let’s align on the scope.' },
+  { id: 'v7', en: 'bandwidth', cn: '精力 / 时间余量', ex: 'Do you have bandwidth this week?' },
+  { id: 'v8', en: 'touch base', cn: '沟通一下', ex: 'Let’s touch base tomorrow.' },
+  { id: 'v9', en: 'action item', cn: '待办事项', ex: 'That’s an action item for me.' },
+  { id: 'v10', en: 'stakeholder', cn: '相关方 / 干系人', ex: 'Keep stakeholders informed.' },
+  { id: 'v11', en: 'deliverable', cn: '交付物', ex: 'The deliverable is the report.' },
+  { id: 'v12', en: 'ramp up', cn: '加快 / 启动', ex: 'We’ll ramp up next month.' },
+];
+function todayVocab() {
+  const base = parseInt(todayStr().replace(/-/g, ''), 10) || 0;
+  const start = base % EN_VOCAB.length;
+  const out = [];
+  for (let i = 0; i < 10; i++) out.push(EN_VOCAB[(start + i) % EN_VOCAB.length]);
+  return out;
+}
+function speak(text) {
+  try {
+    if (!('speechSynthesis' in window)) { toast('当前浏览器不支持朗读'); return; }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-US'; u.rate = 0.95;
+    window.speechSynthesis.speak(u);
+  } catch (e) { toast('朗读不可用'); }
+}
+
+/* ---------- 状态 ---------- */
+function seed() {
+  return {
+    sidebar: [
+      { id: 'work', name: '工作', icon: '💼', core: true },
+      { id: 'english', name: '英语', icon: '📚', core: true },
+      { id: 'finance', name: '理财', icon: '💰', core: true },
+      { id: 'recipes', name: '食谱', icon: '🍳', core: true },
+      { id: 'fresh', name: '新鲜玩意', icon: '✨', core: true },
+    ],
+    work: { todos: {} },
+    english: { checkins: {}, subs: {}, vocabMastered: [] },
+    finance: { knowledge: SAMPLE_KNOWLEDGE.slice(), reads: [] },
+    recipes: { favs: [], dailySeed: {} },
+    fresh: { items: SAMPLE_FRESH.slice(), favs: [] },
+    custom: {},
+    settings: { sync: { mode: 'local', url: '', enabled: false, cloudId: '', cloudUrl: '', cloudKey: '' } },
+  };
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return seed();
+    const s = JSON.parse(raw);
+    // 简单补字段
+    const base = seed();
+    return Object.assign(base, s, {
+      work: Object.assign(base.work, s.work),
+      english: Object.assign(base.english, s.english),
+      finance: Object.assign(base.finance, s.finance),
+      recipes: Object.assign(base.recipes, s.recipes),
+      fresh: Object.assign(base.fresh, s.fresh),
+      settings: Object.assign(base.settings, s.settings || {}, {
+        sync: Object.assign(base.settings.sync, (s.settings && s.settings.sync) || {}),
+      }),
+    });
+  } catch (e) { return seed(); }
+}
+let state = load();
+let _pushTimer = null, _lastPush = 0, _syncing = false;
+function save(silent) {
+  localStorage.setItem(KEY, JSON.stringify(state));
+  if (!silent && syncActive()) schedulePush();
+}
+
+/* ---------- 顶部日期 / 问候 ---------- */
+function greet() {
+  const h = new Date().getHours();
+  if (h < 6) return '夜深了'; if (h < 11) return '早上好'; if (h < 14) return '中午好';
+  if (h < 18) return '下午好'; return '晚上好';
+}
+function renderTopbar(title) {
+  $('#pageTitle').textContent = title;
+  const d = new Date();
+  $('#pageDate').textContent = `${greet()} · ${todayStr()} ${WEEK[d.getDay()]}`;
+}
+
+/* ---------- 导航栏 ---------- */
+let current = 'work';
+function renderSidebar() {
+  const nav = $('#nav'); nav.innerHTML = '';
+  state.sidebar.forEach(it => {
+    const a = document.createElement('div');
+    a.className = 'nav-item' + (it.id === current ? ' active' : '');
+    a.dataset.id = it.id;
+    a.innerHTML = `<span class="ni-icon">${it.icon}</span><span class="ni-name">${esc(it.name)}</span>` +
+      (state.sidebar.length > 1 ? `<span class="ni-remove" title="移除该板块" data-remove="${it.id}">✕</span>` : '');
+    nav.appendChild(a);
+  });
+}
+function go(id) {
+  const it = state.sidebar.find(s => s.id === id);
+  if (!it) return;
+  current = id;
+  renderSidebar();
+  renderView();
+  $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show');
+  if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+}
+
+/* ---------- 视图分发 ---------- */
+function renderView() {
+  const it = state.sidebar.find(s => s.id === current) || state.sidebar[0];
+  renderTopbar(it.name);
+  const v = $('#view');
+  if (it.core) {
+    ({ work: viewWork, english: viewEnglish, finance: viewFinance, recipes: viewRecipes, fresh: viewFresh }[it.id] || viewWork)(v);
+  } else {
+    viewCustom(v, it);
+  }
+  updateStreakPill();
+}
+
+/* =================== 工作 =================== */
+const CATS = ['组内', '科室', '部门'];
+function ensureToday() {
+  const t = todayStr();
+  if (!state.work.todos[t]) { state.work.todos[t] = []; save(); }
+}
+function workStats() {
+  const now = new Date();
+  const t = todayStr();
+  const today = state.work.todos[t] || [];
+  const dow = (now.getDay() + 6) % 7;
+  const weekStart = addDays(startOfDay(now), -dow);
+  let wTotal = 0, wDone = 0, iTotal = 0, iDone = 0;
+  Object.keys(state.work.todos).forEach(d => {
+    const dd = new Date(d);
+    if (dd >= weekStart) { const arr = state.work.todos[d]; wTotal += arr.length; wDone += arr.filter(x => x.done).length; }
+    if (dd.getFullYear() === now.getFullYear() && dd.getMonth() === now.getMonth()) {
+      state.work.todos[d].forEach(x => { if (x.prio === 'important') { iTotal++; if (x.done) iDone++; } });
+    }
+  });
+  return { todayTotal: today.length, todayDone: today.filter(x => x.done).length, wTotal, wDone, iTotal, iDone };
+}
+function viewWork(v) {
+  ensureToday();
+  const t = todayStr();
+  const today = state.work.todos[t] || [];
+  const dates = Object.keys(state.work.todos).filter(d => d !== t).sort().reverse();
+  const st = workStats();
+  v.innerHTML = `
+  <div class="card card-soft">
+    <div class="card-head"><span class="ch-emoji">📊</span><h2>效率概览</h2><span class="ch-sub">坚持记录，季度 / 年度总结更轻松</span></div>
+    <div class="stats-row">
+      <div class="mini-stat"><div class="n">${st.todayDone}/${st.todayTotal}</div><div class="l">今日完成</div></div>
+      <div class="mini-stat"><div class="n">${st.wDone}/${st.wTotal}</div><div class="l">本周完成</div></div>
+      <div class="mini-stat"><div class="n">${st.iDone}/${st.iTotal}</div><div class="l">本月重要</div></div>
+      <div class="mini-stat"><div class="n">${st.wTotal ? Math.round(st.wDone / st.wTotal * 100) : 0}%</div><div class="l">本周完成率</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">📝</span><h2>今日 To Do</h2>
+      <span class="ch-sub">${t} ${WEEK[new Date().getDay()]}</span></div>
+    <div class="todo-add">
+      <input class="field" id="todoInput" placeholder="写点今天要做的事…" />
+      <div class="seg" id="catSeg">
+        ${CATS.map((c, i) => `<button data-cat="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
+      </div>
+      <div class="seg" id="prioSeg">
+        <button data-prio="important" class="on">⭐ 重要</button>
+        <button data-prio="daily">🌀 日常</button>
+      </div>
+      <button class="btn primary" data-act="todo-add">＋ 添加</button>
+    </div>
+    <div class="todo-group" id="todayGroup" style="margin-top:14px">
+      ${today.length ? today.map(todoRow).join('') : '<div class="empty">还没有安排，先写一条吧～</div>'}
+    </div>
+    <div style="margin-top:14px"><button class="btn yellow sm" data-act="report-open">📊 生成半月/月/季/年报</button></div>
+  </div>
+
+  ${dates.length ? `<div class="card card-soft"><div class="card-head"><span class="ch-emoji">🗂️</span><h2>历史记录</h2><span class="ch-sub">点击日期可折叠</span></div>
+    ${dates.map(d => historyDay(d)).join('')}
+  </div>` : ''}
+  `;
+}
+function todoRow(tk) {
+  const catPill = `<span class="pill green">${esc(tk.cat)}</span>`;
+  const prioPill = tk.prio === 'important' ? '<span class="pill imp">重要</span>' : '<span class="pill daily">日常</span>';
+  return `<div class="todo-item ${tk.done ? 'done' : ''}" data-id="${tk.id}">
+    <div class="todo-check" data-act="todo-toggle" data-id="${tk.id}" data-date="${tk.date}">${tk.done ? '✓' : ''}</div>
+    <div class="todo-text">${esc(tk.text)}</div>
+    <div class="todo-meta">${catPill}${prioPill}</div>
+    <div class="todo-del" data-act="todo-del" data-id="${tk.id}" data-date="${tk.date}">🗑</div>
+  </div>`;
+}
+function historyDay(d) {
+  const list = state.work.todos[d] || [];
+  const done = list.filter(x => x.done).length;
+  return `<div class="todo-day collapsed" data-date="${d}">
+    <div class="todo-day-head" data-act="day-toggle" data-date="${d}">
+      <span class="caret">▾</span><span>📅 ${d} ${WEEK[new Date(d).getDay()]}</span>
+      <span class="tw">${done}/${list.length}</span>
+    </div>
+    <div class="todo-day-body">${list.length ? list.map(todoRow).join('') : '<div class="empty">无记录</div>'}</div>
+  </div>`;
+}
+
+/* ---------- 报告 ---------- */
+function dateRange(type, base = new Date()) {
+  const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  if (type === 'half') {
+    if (d <= 15) return { s: `${y}-${String(m + 1).padStart(2, '0')}-01`, e: `${y}-${String(m + 1).padStart(2, '0')}-15` };
+    const ld = daysInMonth(y, m);
+    return { s: `${y}-${String(m + 1).padStart(2, '0')}-16`, e: `${y}-${String(m + 1).padStart(2, '0')}-${ld}` };
+  }
+  if (type === 'month') {
+    const ld = daysInMonth(y, m);
+    return { s: `${y}-${String(m + 1).padStart(2, '0')}-01`, e: `${y}-${String(m + 1).padStart(2, '0')}-${ld}` };
+  }
+  if (type === 'quarter') {
+    const q = Math.floor(m / 3); const sm = q * 3; const em = sm + 2;
+    const ld = daysInMonth(y, em);
+    return { s: `${y}-${String(sm + 1).padStart(2, '0')}-01`, e: `${y}-${String(em + 1).padStart(2, '0')}-${ld}` };
+  }
+  if (type === 'year') return { s: `${y}-01-01`, e: `${y}-12-31` };
+  return null;
+}
+function openReport() {
+  const types = [['half', '半月报'], ['month', '月报'], ['quarter', '季报'], ['year', '年报']];
+  openModal(`<h2>📊 工作汇报</h2>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，自动汇总该时段「重要 / 日常」任务的完成情况，方便季度与年度总结。</p>
+    <div class="row" id="repTypes">
+      ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
+      <button class="btn sm ghost" data-act="report-gen" data-range="custom">自定义</button>
+    </div>
+    <div class="row" id="repCustom" style="display:none">
+      <label>起 <input type="date" class="field" id="repS" style="width:150px"></label>
+      <label>止 <input type="date" class="field" id="repE" style="width:150px"></label>
+      <button class="btn primary sm" data-act="report-gen" data-range="custom">生成</button>
+    </div>
+    <div id="repOut"></div>`);
+}
+function genReport(range) {
+  let r;
+  if (range === 'custom') {
+    const s = $('#repS').value, e = $('#repE').value;
+    if (!s || !e) { toast('请选择起止日期'); return; }
+    r = { s, e };
+  } else {
+    r = dateRange(range);
+  }
+  const all = [];
+  Object.keys(state.work.todos).forEach(d => {
+    if (d >= r.s && d <= r.e) state.work.todos[d].forEach(t => all.push(Object.assign({ date: d }, t)));
+  });
+  const imp = all.filter(t => t.prio === 'important');
+  const daily = all.filter(t => t.prio === 'daily');
+  const impDone = imp.filter(t => t.done).length;
+  const dailyDone = daily.filter(t => t.done).length;
+  const out = `
+    <div class="report-summary">
+      <div class="stat-row">
+        <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
+        <div class="stat"><div class="num">${imp.length}</div><div class="lab">重要任务</div></div>
+        <div class="stat"><div class="num">${impDone}/${imp.length}</div><div class="lab">重要完成</div></div>
+        <div class="stat"><div class="num">${dailyDone}/${daily.length}</div><div class="lab">日常完成</div></div>
+      </div>
+      <strong style="font-size:14px">⭐ 重要任务清单（用于季度 / 年度总结）</strong>
+      ${imp.length ? `<ul class="report-list">${imp.map(t => `<li><span>${t.done ? '✅' : '⬜'}</span><span><b>${esc(t.text)}</b> <span class="pill gray">${esc(t.cat)}</span> <span class="pill gray">${t.date}</span></span></li>`).join('')}</ul>`
+        : '<p style="color:var(--ink-soft);font-size:13px">该区间没有标记为「重要」的任务。</p>'}
+    </div>`;
+  const payload = `工作汇报（${r.s} ~ ${r.e}）\n重要完成 ${impDone}/${imp.length}，日常完成 ${dailyDone}/${daily.length}\n\n【重要任务清单】\n` +
+    (imp.length ? imp.map(t => `${t.done ? '✅' : '⬜'} ${t.text} [${t.cat}] ${t.date}`).join('\n') : '（无）');
+  lastReport = { text: payload, name: `工作汇报_${r.s}_${r.e}.md` };
+  $('#repOut').innerHTML = out + `<div style="margin-top:12px"><button class="btn sm ghost" data-act="report-copy">📋 复制摘要</button> <button class="btn sm yellow" data-act="report-export">⬇ 导出文件</button></div>`;
+  $('#repOut').dataset.payload = payload;
+}
+
+/* =================== 英语 =================== */
+function enStreak() {
+  let streak = 0; const d = new Date();
+  while (true) {
+    const k = todayStr(d);
+    const c = state.english.checkins[k];
+    if (c && (c.listen || c.speak || c.vocab || c.meet)) { streak++; d.setDate(d.getDate() - 1); }
+    else break;
+  }
+  return streak;
+}
+function enHeatmap() {
+  const cells = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = addDays(new Date(), -i); const k = todayStr(d);
+    const c = state.english.checkins[k];
+    const n = c ? ['listen', 'speak', 'vocab', 'meet'].filter(x => c[x]).length : 0;
+    cells.push({ k, n });
+  }
+  return cells;
+}
+function enSkillCount(type) { let n = 0; Object.values(state.english.checkins).forEach(c => { if (c && c[type]) n++; }); return n; }
+function enTotalDays() { return Object.values(state.english.checkins).filter(c => c && (c.listen || c.speak || c.vocab || c.meet)).length; }
+function viewEnglish(v) {
+  const t = todayStr();
+  const c = state.english.checkins[t] || {};
+  const subs = state.english.subs[t] || {};
+  const doneCount = ['listen', 'speak', 'vocab', 'meet'].filter(k => c[k]).length;
+  const vocab = todayVocab();
+  const mastered = state.english.vocabMastered;
+
+  const planCards = EN_PLAN.map(p => {
+    const done = c[p.type];
+    const sub = subs[p.type] || {};
+    let body;
+    if (p.type === 'vocab') {
+      body = `<div class="vocab-list">${vocab.map(w => {
+        const ok = mastered.includes(w.id);
+        return `<div class="vocab-item ${ok ? 'on' : ''}">
+          <button class="vocab-spk" data-act="en-play" data-text="${encodeURIComponent(w.en)}" title="听发音">🔊</button>
+          <div class="vocab-main"><b>${esc(w.en)}</b> <span class="vocab-cn">${esc(w.cn)}</span>
+            <div class="vocab-ex">${esc(w.ex)}</div></div>
+          <button class="btn xs ${ok ? 'yellow' : 'ghost'}" data-act="en-vocab" data-id="${w.id}">${ok ? '★ 已掌握' : '标记掌握'}</button>
+        </div>`;
+      }).join('')}</div>`;
+    } else {
+      body = `<div class="en-material">${esc(p.material).split('\n').map(l => `<div>${esc(l)}</div>`).join('')}</div>
+        <button class="btn xs ghost" data-act="en-play" data-text="${encodeURIComponent(p.material)}">🔊 听发音</button>`;
+    }
+    const steps = (p.steps || []).map((s, i) => {
+      const ck = sub[i];
+      return `<label class="en-step ${ck ? 'on' : ''}"><input type="checkbox" ${ck ? 'checked' : ''} data-act="en-sub" data-type="${p.type}" data-idx="${i}"> <span>${esc(s)}</span></label>`;
+    }).join('');
+    return `<div class="card card-soft plan-card ${done ? 'done' : ''}">
+      <div class="plan-top">
+        <div class="plan-ic ${p.cls}">${p.icon}</div>
+        <div><h3>${p.title}</h3><p class="plan-desc">${esc(p.desc)}</p></div>
+      </div>
+      ${body}
+      <div class="en-steps">${steps}</div>
+      <div class="checkin-row">
+        <button class="btn sm ${done ? 'primary' : ''}" data-act="en-check" data-type="${p.type}">${done ? '✓ 已完成打卡' : '打卡完成'}</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">📚</span><h2>每日英语打卡</h2>
+      <span class="ch-sub">流利说 LV4 · 今日 ${doneCount}/4</span></div>
+    <p style="color:var(--ink-soft);font-size:13.5px;margin:0 0 10px">
+      你的发音不错，重点补<b>听力</b>与<b>输出</b>。下面四项都能<b>直接在页面完成</b>（点 🔊 可听发音，不用跳转外部网站），每天约 30 分钟，坚持一个月开会/闲聊更顺。</p>
+    <div class="grid grid-2">${planCards}</div>
+    <div style="margin-top:12px" class="pill yellow">🔥 连续打卡 ${enStreak()} 天</div>
+  </div>
+  <div class="card card-soft">
+    <div class="card-head"><span class="ch-emoji">📈</span><h2>打卡轨迹（近 30 天）</h2>
+      <span class="ch-sub">共打卡 ${enTotalDays()} 天</span></div>
+    <div class="heatmap">${enHeatmap().map(c => `<div class="hm-cell hm-${c.n}" title="${c.k}">${c.n ? '●' : ''}</div>`).join('')}</div>
+    <div class="skill-bars">
+      ${EN_PLAN.map(p => `<div class="skill-bar"><span class="sb-name">${p.title.split(' ')[0]}</span><div class="sb-track"><div class="sb-fill" style="width:${Math.round(enSkillCount(p.type) / 30 * 100)}%"></div></div><span class="sb-num">${enSkillCount(p.type)} 天</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+/* =================== 理财 =================== */
+function viewFinance(v) {
+  const tipIdx = new Date().getDate() % state.finance.knowledge.length;
+  const tip = state.finance.knowledge[tipIdx];
+  v.innerHTML = `
+  <div class="card" style="background:linear-gradient(135deg,var(--green-100),var(--yellow-50))">
+    <div class="card-head"><span class="ch-emoji">💡</span><h2>今日理财小知识</h2></div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <div style="font-size:30px">${['🌱','📈','💡','🪙','📊'][tipIdx % 5]}</div>
+      <div><b style="font-size:15px">${esc(tip.title)}</b><p style="margin:2px 0 0;color:var(--ink-soft);font-size:13px">${esc(tip.body)}</p></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">📚</span><h2>理财知识库</h2>
+      <span class="ch-sub">
+        <button class="btn sm yellow" data-act="quiz-open">🧭 风险测评</button>
+        <button class="btn sm ghost" data-act="know-add">＋ 记一条</button>
+      </span></div>
+    <div class="know-filterbar" id="knowFilter">
+      ${['全部', ...Array.from(new Set(state.finance.knowledge.map(k => k.tag)))].map(tg => `<button class="chip ${tg === knowFilter ? 'on' : ''}" data-tag="${tg}">${tg}</button>`).join('')}
+    </div>
+    <div class="grid grid-3">
+      ${state.finance.knowledge.filter(k => knowFilter === '全部' || k.tag === knowFilter).map(k => `
+        <div class="card card-soft know-card">
+          <span class="pill green">${esc(k.tag)}</span>
+          <h3>${esc(k.title)}</h3><p>${esc(k.body)}</p>
+        </div>`).join('')}
+    </div>
+  </div>
+  <div class="card card-soft">
+    <div class="card-head"><span class="ch-emoji">📡</span><h2>财经动向 / 趋势</h2>
+      <span class="ch-sub"><a class="jump-link" href="https://www.bilibili.com/search/all?keyword=%E8%B4%A2%E7%BB%8F%E6%96%B0%E9%97%BB" target="_blank" rel="noopener">看原平台 ▶</a></span></div>
+    <p style="color:var(--ink-soft);font-size:13.5px;margin:0">
+      想了解实时行情与产品，可连接 <b>腾讯自选股 / 盈米 / Wind</b> 等连接器获取推送；
+      当前为本地知识库，建议每周挑 1–2 个概念（如 index fund、资产配置）深入了解后再试小额产品。</p>
+  </div>`;
+}
+
+/* =================== 食谱 =================== */
+function daySeed(dStr) {
+  // 用日期生成稳定“今日三餐”选择
+  if (!state.recipes.dailySeed[dStr]) {
+    const pool = SAMPLE_RECIPES.slice();
+    const pick = (meal) => {
+      const cands = pool.filter(r => r.meal === meal);
+      const base = parseInt(dStr.replace(/-/g, ''), 10);
+      return cands[base % cands.length];
+    };
+    state.recipes.dailySeed[dStr] = { breakfast: pick('breakfast').id, lunch: pick('lunch').id, dinner: pick('dinner').id };
+    save();
+  }
+  return state.recipes.dailySeed[dStr];
+}
+function viewRecipes(v) {
+  const t = todayStr();
+  const seed = daySeed(t);
+  const meals = [['breakfast', '🌞 早餐', '🍳'], ['lunch', '🍱 午餐（带饭友好）', '🍱'], ['dinner', '🌙 晚餐', '🍲']];
+  const libFilter = recipeFilter === 'fav'
+    ? SAMPLE_RECIPES.filter(r => state.recipes.favs.includes(r.id))
+    : recipeFilter === 'all' ? SAMPLE_RECIPES : SAMPLE_RECIPES.filter(r => r.meal === recipeFilter);
+  v.innerHTML = `
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">🍳</span><h2>今日三餐</h2>
+      <span class="ch-sub"><button class="btn sm ghost" data-act="recipe-shuffle">🔄 换一批</button></span></div>
+    <div class="grid grid-3">
+      ${meals.map(([m, label, ic]) => {
+        const r = SAMPLE_RECIPES.find(x => x.id === seed[m]);
+        const fav = state.recipes.favs.includes(r.id);
+        return `<div class="card card-soft recipe-card">
+          <div class="rc-head"><div class="rc-thumb">${r.emoji}</div>
+            <div><h3 style="margin:0;font-size:15px">${label}</h3>
+            <span style="font-size:12px;color:var(--ink-soft)">${r.name} · 约 ${r.time} 分钟</span></div></div>
+          <ul class="recipe-steps">${r.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+          <div class="recipe-tags">${r.tags.map(tg => `<span class="pill green">${esc(tg)}</span>`).join('')}</div>
+          <div class="checkin-row">
+            <button class="btn sm ${fav ? 'yellow' : 'ghost'}" data-act="recipe-fav" data-id="${r.id}">${fav ? '★ 已收藏' : '☆ 收藏'}</button>
+            <a class="jump-link" href="https://www.bilibili.com/search/all?keyword=${encodeURIComponent(r.name)}" target="_blank" rel="noopener">▶ 看做法</a>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+  <div class="card card-soft">
+    <div class="card-head"><span class="ch-emoji">🥘</span><h2>菜谱库</h2>
+      <span class="ch-sub">${recipeFilter === 'fav' ? '我的收藏' : '按餐次挑选'}</span></div>
+    <div class="filterbar" id="recipeFilter">
+      ${[['all', '全部'], ['breakfast', '早餐'], ['lunch', '午餐'], ['dinner', '晚餐'], ['fav', '★ 收藏']].map(([v, l]) => `<button class="chip ${recipeFilter === v ? 'on' : ''}" data-act="recipe-filter" data-meal="${v}">${l}</button>`).join('')}
+    </div>
+    <div class="grid grid-3">
+      ${libFilter.length ? libFilter.map(r => {
+        const fav = state.recipes.favs.includes(r.id);
+        const mealLabel = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐' }[r.meal];
+        return `<div class="card recipe-card">
+          <div class="rc-head"><div class="rc-thumb">${r.emoji}</div>
+            <div><h3 style="margin:0;font-size:15px">${r.name}</h3>
+            <span style="font-size:12px;color:var(--ink-soft)">${mealLabel} · 约 ${r.time} 分钟</span></div></div>
+          <ul class="recipe-steps">${r.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+          <div class="recipe-tags">${r.tags.map(tg => `<span class="pill green">${esc(tg)}</span>`).join('')}</div>
+          <div class="checkin-row">
+            <button class="btn sm ${fav ? 'yellow' : 'ghost'}" data-act="recipe-fav" data-id="${r.id}">${fav ? '★ 已收藏' : '☆ 收藏'}</button>
+            <a class="jump-link" href="https://www.bilibili.com/search/all?keyword=${encodeURIComponent(r.name)}" target="_blank" rel="noopener">▶ 看做法</a>
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty">这里还没有收藏，去上面点个 ☆ 吧～</div>'}
+    </div>
+  </div>`;
+}
+
+/* =================== 新鲜玩意 =================== */
+const FRESH_CATS = ['全部', '穿搭', '餐厅', '游玩', '潮流', '理财投资', '副业', '娱乐', '收藏'];
+let freshFilter = '全部';
+let knowFilter = '全部';
+let recipeFilter = 'all';
+let quizSel = {};
+function openQuiz() {
+  quizSel = {};
+  const qs = [
+    { q: '这笔钱大概多久不会用到？', o: ['随时要用', '半年内', '1–3 年', '3 年以上'] },
+    { q: '如果账户短期跌 20%，你会？', o: ['立刻卖出', '很焦虑', '还能忍', '无所谓当定投'] },
+    { q: '你的主要目标是？', o: ['保本就好', '跑赢通胀', '稳健增值', '高收益敢冒险'] },
+  ];
+  openModal(`<h2>🧭 理财风险小测评</h2>
+   <p style="color:var(--ink-soft);font-size:13px;margin:0 0 4px">3 题帮你判断适合的类型（仅供参考，非投资建议）</p>
+   <div id="quizBox">${qs.map((it, i) => `<div class="quiz-q"><div class="qq">${i + 1}. ${it.q}</div>${it.o.map((o, j) => `<label class="quiz-opt" data-q="${i}" data-v="${j}">${o}</label>`).join('')}</div>`).join('')}</div>
+   <div class="row"><button class="btn primary" data-act="quiz-calc">看结果</button></div>
+   <div id="quizOut"></div>`);
+}
+function viewFresh(v) {
+  const items = freshFilter === '收藏'
+    ? state.fresh.items.filter(i => state.fresh.favs.includes(i.id))
+    : state.fresh.items.filter(i => freshFilter === '全部' || i.cat === freshFilter);
+  v.innerHTML = `
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">✨</span><h2>新鲜玩意</h2>
+      <span class="ch-sub"><button class="btn sm ghost" data-act="fresh-add">＋ 添加灵感</button></span></div>
+    <div class="filterbar" id="freshFilter">
+      ${FRESH_CATS.map(c => `<button class="chip ${c === freshFilter ? 'on' : ''}" data-cat="${c}">${c}</button>`).join('')}
+    </div>
+    <div class="grid grid-3">
+      ${items.length ? items.map(i => {
+        const col = { '穿搭': 'var(--yellow-100)', '餐厅': '#FFE0E0', '游玩': '#E0EEFF', '潮流': 'var(--green-100)', '理财投资': '#E6F0FF', '副业': '#F3E8FF', '娱乐': '#FFF0D6' }[i.cat] || 'var(--green-100)';
+        const fav = state.fresh.favs.includes(i.id);
+        return `<div class="card card-soft fresh-card">
+          <span class="fresh-cat" style="background:${col}">${esc(i.cat)}</span>
+          <h3>${esc(i.title)}</h3><p>${esc(i.desc)}</p>
+          ${i.hot ? `<span class="hot">${esc(i.hot)}</span>` : ''}
+          <div class="checkin-row">
+            <a class="jump-link" href="${i.link}" target="_blank" rel="noopener">▶ 看原平台</a>
+            <button class="btn sm ${fav ? 'yellow' : 'ghost'}" data-act="fresh-fav" data-id="${i.id}">${fav ? '★' : '☆'}</button>
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty">这个分类还没有内容，点“添加灵感”记一条吧～</div>'}
+    </div>
+  </div>`;
+}
+
+/* =================== 自定义板块 =================== */
+function viewCustom(v, it) {
+  if (!state.custom[it.id]) state.custom[it.id] = { notes: '', icon: it.icon };
+  const c = state.custom[it.id];
+  v.innerHTML = `
+  <div class="card">
+    <div class="card-head"><span class="ch-emoji">${it.icon}</span><h2>${esc(it.name)}</h2>
+      <span class="ch-sub">自定义板块</span></div>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 8px">随手记点东西，数据同样本地保存：</p>
+    <textarea class="field" id="customNotes" rows="8" placeholder="今天的灵感 / 待办 / 链接…">${esc(c.notes)}</textarea>
+    <div style="margin-top:10px"><button class="btn primary sm" data-act="custom-save" data-id="${it.id}">保存</button></div>
+  </div>`;
+}
+
+/* =================== 设置 / 数据 =================== */
+function openSettings() {
+  const s = state.settings.sync;
+  openModal(`<h2>⚙ 设置 / 数据</h2>
+    <div class="set-row"><span>导出全部数据（JSON）</span><button class="btn sm primary" data-act="export">下载</button></div>
+    <div class="set-row"><span>导入数据（覆盖）</span><button class="btn sm" data-act="import">选择文件</button><input type="file" id="importFile" accept="application/json" style="display:none"></div>
+    <div class="set-row"><span>恢复默认导航栏</span><button class="btn sm ghost" data-act="reset-nav">重置</button></div>
+    <hr style="border:none;border-top:1px dashed var(--line);margin:14px 0">
+    <div class="set-row" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="font-weight:800">🔄 多端实时同步</div>
+      <p style="font-size:12.5px;color:var(--ink-soft);margin:0">想「不在家、电脑关机也能同步」就选 <b>云端 Supabase</b>（免费、邮箱注册、数据存在云端，两端随时一致）。在家且电脑常开也可用本地服务。</p>
+      <label>同步方式
+        <select id="syncMode" class="field">
+          <option value="local" ${s.mode !== 'cloud' ? 'selected' : ''}>本地服务（仅在家）</option>
+          <option value="cloud" ${s.mode === 'cloud' ? 'selected' : ''}>云端 Supabase（随时可用）</option>
+        </select>
+      </label>
+      <div id="syncLocal">
+        <label>服务地址 <input class="field" id="syncUrl" value="${esc(s.url)}" placeholder="http://电脑局域网IP:8787/workbench"></label>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="syncOn" ${s.enabled ? 'checked' : ''}> 启用自动同步</label>
+      </div>
+      <div id="syncCloud">
+        <label>Supabase 项目 URL
+          <input class="field" id="cloudUrl" value="${esc(s.cloudUrl || '')}" placeholder="https://xxxx.supabase.co（带 /rest/v1/ 也行）"></label>
+        <label>anon key（公开密钥）
+          <input class="field" id="cloudKey" type="password" value="${esc(s.cloudKey || '')}" placeholder="在 Supabase 项目 API 设置里复制"></label>
+        <p style="font-size:12px;color:var(--ink-soft);margin:0">获取方法：① 打开 <b>supabase.com</b> 用邮箱注册 → 新建一个 Project；② 左侧 <b>SQL Editor</b> 粘贴运行我给你的建表语句；③ 左侧 <b>Project Settings → API</b> 复制 <b>Project URL</b> 与 <b>anon public key</b> 填上面。首次点「立即同步」会自动写入云端，不用手动建。</p>
+      </div>
+      <button class="btn sm yellow" data-act="sync-now">立即同步一次</button>
+    </div>
+    <hr style="border:none;border-top:1px dashed var(--line);margin:14px 0">
+    <div class="set-row"><span>清空所有数据</span><button class="btn sm ghost" data-act="wipe">清空</button></div>`);
+  const modeSel = $('#syncMode');
+  const applyMode = () => {
+    const cloud = modeSel.value === 'cloud';
+    $('#syncLocal').style.display = cloud ? 'none' : '';
+    $('#syncCloud').style.display = cloud ? '' : 'none';
+  };
+  modeSel.addEventListener('change', applyMode);
+  applyMode();
+}
+
+/* =================== 弹窗 =================== */
+function openModal(html) {
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="modal-scrim" data-act="modal-close"></div><div class="modal">${html}<button class="close" data-act="modal-close">✕</button></div>`;
+  root.classList.add('show');
+}
+function closeModal() { $('#modalRoot').classList.remove('show'); $('#modalRoot').innerHTML = ''; }
+
+/* =================== 顶部连续打卡 =================== */
+function updateStreakPill() {
+  const p = $('#globalStreak');
+  const s = enStreak();
+  p.textContent = s > 0 ? `🔥 英语连打卡 ${s} 天` : '🌱 今日还没打卡';
+}
+
+/* =================== 事件：导航 / 顶栏 =================== */
+$('#nav').addEventListener('click', e => {
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    const id = rm.dataset.remove;
+    if (state.sidebar.length <= 1) { toast('至少保留一个板块'); return; }
+    state.sidebar = state.sidebar.filter(s => s.id !== id);
+    delete state.custom[id];
+    save(); renderSidebar();
+    if (current === id) { current = state.sidebar[0].id; renderView(); }
+    toast('已移除板块'); return;
+  }
+  const item = e.target.closest('.nav-item');
+  if (item) go(item.dataset.id);
+});
+$('#hambBtn').addEventListener('click', () => { $('#sidebar').classList.add('open'); $('#scrim').classList.add('show'); });
+$('#scrim').addEventListener('click', () => { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show'); });
+$('#settingsBtn').addEventListener('click', openSettings);
+$('#addSectionBtn').addEventListener('click', () => {
+  const emojis = ['📌', '🎯', '🌟', '📖', '🎨', '🏃', '🧘', '🎵', '🐱', '🌈'];
+  openModal(`<h2>＋ 添加板块</h2>
+    <div class="row"><label>名称</label><input class="field" id="newName" placeholder="如：读书 / 健身 / 旅行" style="flex:1"></div>
+    <div class="row"><label>图标</label><div id="emojiPick" style="display:flex;gap:8px;flex-wrap:wrap">
+      ${emojis.map((e, i) => `<button class="chip ${i === 0 ? 'on' : ''}" data-emoji="${e}">${e}</button>`).join('')}</div></div>
+    <div class="row"><button class="btn primary" data-act="add-section-do">添加</button></div>`);
+});
+
+/* =================== 事件：主视图委托 =================== */
+$('#view').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act;
+  if (act === 'todo-add') {
+    const input = $('#todoInput'); const text = input.value.trim();
+    if (!text) { toast('先写点内容'); return; }
+    const cat = ($('#catSeg .on') || {}).dataset?.cat || CATS[0];
+    const prio = ($('#prioSeg .on') || {}).dataset?.prio || 'important';
+    const t = todayStr();
+    state.work.todos[t].push({ id: uid(), text, cat, prio, done: false, date: t });
+    save(); input.value = ''; viewWork($('#view'));
+  }
+  else if (act === 'todo-toggle') {
+    const { id, date } = el.dataset;
+    const item = (state.work.todos[date] || []).find(x => x.id === id);
+    if (item) { item.done = !item.done; save(); viewWork($('#view')); }
+  }
+  else if (act === 'todo-del') {
+    const { id, date } = el.dataset;
+    state.work.todos[date] = (state.work.todos[date] || []).filter(x => x.id !== id);
+    save(); viewWork($('#view'));
+  }
+  else if (act === 'day-toggle') {
+    const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
+  }
+  else if (act === 'report-open') openReport();
+  else if (act === 'report-gen') {
+    const r = el.dataset.range;
+    if (r === 'custom') { $('#repCustom').style.display = 'flex'; return; }
+    genReport(r);
+  }
+  else if (act === 'report-copy') {
+    const payload = $('#repOut').dataset.payload || '';
+    navigator.clipboard?.writeText(payload).then(() => toast('已复制摘要')).catch(() => toast('复制失败'));
+  }
+  else if (act === 'report-export') {
+    if (lastReport.text) { download(lastReport.name, lastReport.text); toast('已导出报告文件'); }
+  }
+  else if (act === 'quiz-open') { openQuiz(); }
+  else if (act === 'know-filter') { knowFilter = el.dataset.tag; viewFinance($('#view')); }
+  else if (act === 'recipe-filter') { recipeFilter = el.dataset.meal; viewRecipes($('#view')); }
+  else if (act === 'en-check') {
+    const t = todayStr(); const c = state.english.checkins[t] || {};
+    c[el.dataset.type] = !c[el.dataset.type];
+    state.english.checkins[t] = c; save(); viewEnglish($('#view'));
+  }
+  else if (act === 'en-play') {
+    speak(decodeURIComponent(el.dataset.text || ''));
+  }
+  else if (act === 'en-sub') {
+    const t = todayStr(); state.english.subs[t] = state.english.subs[t] || {};
+    const sub = state.english.subs[t];
+    const ty = el.dataset.type, idx = el.dataset.idx;
+    sub[ty] = sub[ty] || {};
+    sub[ty][idx] = !sub[ty][idx];
+    save(); viewEnglish($('#view'));
+  }
+  else if (act === 'en-vocab') {
+    const id = el.dataset.id; const m = state.english.vocabMastered;
+    m.includes(id) ? m.splice(m.indexOf(id), 1) : m.push(id);
+    save(); viewEnglish($('#view'));
+  }
+  else if (act === 'recipe-fav') {
+    const id = el.dataset.id; const f = state.recipes.favs;
+    f.includes(id) ? f.splice(f.indexOf(id), 1) : f.push(id);
+    save(); viewRecipes($('#view'));
+  }
+  else if (act === 'recipe-shuffle') {
+    const t = todayStr(); delete state.recipes.dailySeed[t]; viewRecipes($('#view'));
+  }
+  else if (act === 'fresh-fav') {
+    const id = el.dataset.id; const f = state.fresh.favs;
+    f.includes(id) ? f.splice(f.indexOf(id), 1) : f.push(id);
+    save(); viewFresh($('#view'));
+  }
+  else if (act === 'know-add') {
+    openModal(`<h2>＋ 记一条理财知识</h2>
+      <div class="row"><label>标签</label><input class="field" id="kTag" placeholder="如：入门 / 工具 / 风险" style="flex:1"></div>
+      <div class="row"><label>标题</label><input class="field" id="kTitle" placeholder="如：什么是定投" style="flex:1"></div>
+      <div class="row"><label>内容</label><textarea class="field" id="kBody" rows="3" placeholder="一句话讲清楚"></textarea></div>
+      <div class="row"><button class="btn primary" data-act="know-save">保存</button></div>`);
+  }
+  else if (act === 'know-save') {
+    state.finance.knowledge.unshift({ id: uid(), tag: $('#kTag').value.trim() || '笔记', title: $('#kTitle').value.trim() || '未命名', body: $('#kBody').value.trim() });
+    save(); closeModal(); viewFinance($('#view')); toast('已保存');
+  }
+  else if (act === 'fresh-add') {
+    openModal(`<h2>＋ 添加灵感</h2>
+      <div class="row"><label>分类</label><select class="field" id="fCat">${FRESH_CATS.filter(c => c !== '全部').map(c => `<option>${c}</option>`).join('')}</select></div>
+      <div class="row"><label>标题</label><input class="field" id="fTitle" style="flex:1"></div>
+      <div class="row"><label>描述</label><textarea class="field" id="fDesc" rows="2"></textarea></div>
+      <div class="row"><label>原平台链接</label><input class="field" id="fLink" placeholder="https://..." style="flex:1"></div>
+      <div class="row"><button class="btn primary" data-act="fresh-save">保存</button></div>`);
+  }
+  else if (act === 'fresh-save') {
+    state.fresh.items.unshift({ id: uid(), cat: $('#fCat').value, title: $('#fTitle').value.trim() || '未命名', desc: $('#fDesc').value.trim(), hot: '', link: $('#fLink').value.trim() || '#' });
+    save(); closeModal(); viewFresh($('#view')); toast('已添加');
+  }
+  else if (act === 'custom-save') {
+    state.custom[current].notes = $('#customNotes').value; save(); toast('已保存');
+  }
+});
+
+/* 导航栏分段选择（类别 / 优先级） */
+$('#view').addEventListener('click', e => {
+  const seg = e.target.closest('#catSeg button, #prioSeg button');
+  if (seg) { $$('.seg').forEach(g => { if (g.contains(seg)) $$('button', g).forEach(b => b.classList.remove('on')); }); seg.classList.add('on'); }
+});
+/* 新鲜玩意筛选 */
+$('#view').addEventListener('click', e => {
+  const chip = e.target.closest('#freshFilter .chip');
+  if (chip) { freshFilter = chip.dataset.cat; viewFresh($('#view')); }
+});
+
+/* =================== 弹窗事件委托 =================== */
+$('#modalRoot').addEventListener('click', e => {
+  const opt = e.target.closest('.quiz-opt');
+  if (opt) {
+    const q = opt.dataset.q;
+    $$('#quizBox .quiz-opt').forEach(o => { if (o.dataset.q === q) o.classList.remove('on'); });
+    opt.classList.add('on'); quizSel[q] = Number(opt.dataset.v); return;
+  }
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act;
+  if (act === 'quiz-calc') {
+    const vals = Object.values(quizSel);
+    if (vals.length < 3) { toast('请完成全部 3 题'); return; }
+    const score = vals.reduce((a, b) => a + b, 0);
+    const map = [
+      [2, '保守型', '优先货币基金、国债逆回购、定期存款，先把“安全垫”铺好。'],
+      [4, '稳健型', '以债券基金 / “固收+”为主，少量指数基金定投。'],
+      [6, '平衡型', '股债均衡配置，坚持指数基金定投，控制单只仓位。'],
+      [8, '进取型', '可配置股票 / 行业 ETF，但务必控制仓位、设止损。'],
+    ];
+    const pick = map.find(m => score <= m[0]) || map[map.length - 1];
+    $('#quizOut').innerHTML = `<div class="report-summary" style="margin-top:12px">
+      <div class="stat"><div class="num">${pick[1]}</div><div class="lab">你的类型（得分 ${score}）</div></div>
+      <p style="margin:10px 0 0;font-size:13.5px">${pick[2]}</p>
+      <p style="margin:8px 0 0;font-size:12px;color:var(--ink-soft)">提示：投资有风险，先用小额试水，别一次 all in。</p>
+    </div>`;
+    return;
+  }
+  if (act === 'modal-close') { closeModal(); return; }
+  if (act === 'add-section-do') {
+    const name = ($('#newName').value || '').trim();
+    if (!name) { toast('请填写名称'); return; }
+    const icon = ($('#emojiPick .on') || {}).dataset?.emoji || '📌';
+    const id = 'custom_' + uid();
+    state.sidebar.push({ id, name, icon, core: false });
+    state.custom[id] = { notes: '', icon };
+    save(); closeModal(); renderSidebar(); toast('已添加板块');
+  }
+  if (act === 'export') {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `workbench-backup-${todayStr()}.json`; a.click(); toast('已导出');
+  }
+  if (act === 'import') { $('#importFile').click(); }
+  if (act === 'reset-nav') {
+    state.sidebar = seed().sidebar; save(); renderSidebar(); renderView(); closeModal(); toast('导航栏已重置');
+  }
+  if (act === 'wipe') {
+    if (confirm('确定清空所有数据？此操作不可恢复。')) { localStorage.removeItem(KEY); state = seed(); save(); closeModal(); renderSidebar(); renderView(); toast('已清空'); }
+  }
+  if (act === 'sync-now') {
+    const s = state.settings.sync;
+    s.mode = $('#syncMode').value;
+    if (s.mode === 'cloud') {
+      s.cloudUrl = ($('#cloudUrl').value || '').trim().replace(/\/+$/, '');
+      s.cloudKey = ($('#cloudKey').value || '').trim();
+      if (!s.cloudUrl || !s.cloudKey) { toast('请先填写 Supabase 项目 URL 和 anon key'); return; }
+    } else {
+      s.url = ($('#syncUrl').value || '').trim();
+      s.enabled = $('#syncOn').checked;
+      if (!s.url) { toast('请先填写同步服务地址'); return; }
+    }
+    save(true);
+    syncNow();
+  }
+});
+$('#modalRoot').addEventListener('click', e => {
+  const em = e.target.closest('#emojiPick .chip');
+  if (em) { $$('#emojiPick .chip').forEach(c => c.classList.remove('on')); em.classList.add('on'); }
+});
+$('#importFile') && $('#importFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { try { state = JSON.parse(r.result); save(); closeModal(); renderSidebar(); renderView(); toast('导入成功'); } catch (err) { toast('文件格式错误'); } };
+  r.readAsText(f);
+});
+
+/* =================== 同步（自动 + 合并） =================== */
+// 深合并：数组按 id 取并集，对象递归合并，原始值以远端为准
+function deepMerge(base, inc) {
+  if (Array.isArray(base) && Array.isArray(inc)) {
+    if (base.length && base[0] && typeof base[0] === 'object' && 'id' in base[0]) {
+      const m = new Map(); [...base, ...inc].forEach(x => m.set(x.id, x)); return [...m.values()];
+    }
+    return Array.from(new Set([...base, ...inc].map(x => JSON.stringify(x)))).map(x => JSON.parse(x));
+  }
+  if (base && typeof base === 'object' && inc && typeof inc === 'object' && !Array.isArray(base)) {
+    const out = { ...base };
+    for (const k of Object.keys(inc)) out[k] = (k in out) ? deepMerge(out[k], inc[k]) : inc[k];
+    return out;
+  }
+  return inc === undefined ? base : inc;
+}
+
+/* ============ 同步：本地服务 / 云端 Supabase 通用 ============ */
+function syncActive() {
+  const s = state.settings.sync;
+  return s.mode === 'cloud' ? !!(s.cloudUrl && s.cloudKey) : !!(s.enabled && s.url);
+}
+function cloudBase() {
+  // Supabase API 页面给的 URL 可能带 /rest/v1/，代码里还会再拼 /rest/v1/，
+  // 所以这里统一去掉尾部 /rest/v1* 和斜杠，只保留基础域名
+  return (state.settings.sync.cloudUrl || '').replace(/\/rest\/v\d*\/?$/, '').replace(/\/+$/, '');
+}
+async function pullRemote() {
+  const s = state.settings.sync;
+  if (s.mode === 'cloud') {
+    const r = await fetch(`${cloudBase()}/rest/v1/sync?id=eq.workbench&select=data`, {
+      headers: { 'apikey': s.cloudKey, 'Authorization': `Bearer ${s.cloudKey}` },
+    });
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`拉取失败 HTTP ${r.status}: ${t.slice(0, 200)}`); }
+    const j = await r.json();
+    return (j && j[0] && j[0].data) ? j[0].data : null;
+  }
+  const r = await fetch(s.url, { method: 'GET' });
+  if (!r.ok) throw new Error('拉取失败 HTTP ' + r.status);
+  const j = await r.json();
+  return (j && j.state) ? j.state : null;
+}
+async function pushRemote(st) {
+  const s = state.settings.sync;
+  if (s.mode === 'cloud') {
+    // 首次/后续都走 upsert：用固定 id 'workbench'，两端读写同一行即共享数据
+    const r = await fetch(`${cloudBase()}/rest/v1/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': s.cloudKey,
+        'Authorization': `Bearer ${s.cloudKey}`,
+        'Prefer': 'return=representation, resolution=merge-duplicates',
+      },
+      body: JSON.stringify({ id: 'workbench', data: st, updated_at: new Date().toISOString() }),
+    });
+    if (r.status === 401 || r.status === 403) { const t = await r.text().catch(() => ''); throw new Error(`认证失败 HTTP ${r.status}（可能用了 service_role key？请用 anon key）。详情: ${t.slice(0, 150)}`); }
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`推送失败 HTTP ${r.status}: ${t.slice(0, 200)}`); }
+  } else {
+    await fetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updatedAt: Date.now(), state: st }) });
+  }
+}
+function schedulePush() {
+  if (!syncActive()) return;
+  clearTimeout(_pushTimer);
+  _pushTimer = setTimeout(doPush, 2500);
+}
+async function doPush() {
+  if (_syncing || !syncActive()) return;
+  const now = Date.now();
+  if (now - _lastPush < 15000) { setTimeout(doPush, 15000 - (now - _lastPush)); return; } // 限流，避免触发免费额度
+  _syncing = true;
+  try { await pushRemote(state); _lastPush = Date.now(); } catch (e) {} finally { _syncing = false; }
+}
+async function doPull() {
+  if (_syncing || !syncActive()) return;
+  _syncing = true;
+  try {
+    const remote = await pullRemote();
+    if (remote) { state = deepMerge(state, remote); save(true); renderView(); }
+  } catch (e) {} finally { _syncing = false; }
+}
+async function syncNow() {
+  if (!syncActive()) { toast('请先在同步设置里填好地址或云端密钥'); return; }
+  if (_syncing) return;
+  _syncing = true;
+  try {
+    const remote = await pullRemote();
+    if (remote) state = deepMerge(state, remote);
+    await pushRemote(state);
+    _lastPush = Date.now();
+    save(true);
+    toast('同步成功 ✅');
+    renderView();
+  } catch (e) {
+    // 显示完整错误详情，方便排查
+    const msg = e.message || String(e);
+    console.error('[同步错误]', e);
+    toast('同步失败：' + msg);
+  }
+  _syncing = false;
+}
+
+/* =================== 每日 7 点自动建空白 To Do =================== */
+function autoDaily() {
+  const t = todayStr();
+  if (!state.work.todos[t]) {
+    ensureToday();
+    toast('🌅 已为你准备好今天的空白 To Do 清单');
+    if (current === 'work') viewWork($('#view'));
+  }
+}
+// 打开时建；之后每分钟检查是否跨日（真实 7 点定时需在 PWA 后台周期同步，见 README）
+ensureToday();
+setInterval(autoDaily, 60 * 1000);
+
+/* =================== 启动 =================== */
+function boot() {
+  const hash = location.hash.replace('#', '');
+  if (hash && state.sidebar.find(s => s.id === hash)) current = hash;
+  renderSidebar(); renderView();
+  // 同步：打开即拉取一次；切回页面/打开时再拉；每 5 分钟自动拉取；改动自动推送（限流）
+  if (syncActive()) { doPull(); }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && syncActive()) doPull(); });
+  setInterval(() => { if (syncActive()) doPull(); }, 5 * 60 * 1000);
+  // 注册 PWA
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+boot();
