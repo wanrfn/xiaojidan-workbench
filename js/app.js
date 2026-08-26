@@ -24,12 +24,73 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 1800);
 }
-function download(filename, text, type = 'text/markdown') {
-  const blob = new Blob([text], { type });
+function download(filename, content, type) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: type || 'text/markdown' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-let lastReport = { text: '', name: '' };
+/* ---------- 生成 .docx（纯 JS 打包，无需任何依赖） ---------- */
+function crc32(buf) {
+  let c, table = crc32._t;
+  if (!table) { table = crc32._t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; } }
+  let crc = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function buildZip(files) {
+  const enc = new TextEncoder(); const chunks = []; const central = []; let offset = 0;
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name); const data = f.data; const crc = crc32(data);
+    const local = new Uint8Array(30 + nameBytes.length + data.length); const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true); dv.setUint16(8, 0, true);
+    dv.setUint16(10, 0, true); dv.setUint16(12, 0, true); dv.setUint32(14, crc, true);
+    dv.setUint32(18, data.length, true); dv.setUint32(22, data.length, true); dv.setUint16(26, nameBytes.length, true); dv.setUint16(28, 0, true);
+    local.set(nameBytes, 30); local.set(data, 30 + nameBytes.length); chunks.push(local);
+    const cd = new Uint8Array(46 + nameBytes.length); const cdv = new DataView(cd.buffer);
+    cdv.setUint32(0, 0x02014b50, true); cdv.setUint16(4, 20, true); cdv.setUint16(6, 20, true); cdv.setUint16(8, 0x0800, true);
+    cdv.setUint16(10, 0, true); cdv.setUint16(12, 0, true); cdv.setUint32(16, crc, true); cdv.setUint32(20, data.length, true); cdv.setUint32(24, data.length, true);
+    cdv.setUint16(28, nameBytes.length, true); cdv.setUint16(30, 0, true); cdv.setUint16(32, 0, true); cdv.setUint16(34, 0, true); cdv.setUint16(36, 0, true); cdv.setUint32(38, 0, true); cdv.setUint32(42, offset, true);
+    cd.set(nameBytes, 46); central.push(cd); offset += local.length;
+  }
+  const centralSize = central.reduce((a, c) => a + c.length, 0); const centralOffset = offset;
+  const end = new Uint8Array(22); const edv = new DataView(end.buffer);
+  edv.setUint32(0, 0x06054b50, true); edv.setUint16(4, 0, true); edv.setUint16(6, 0, true); edv.setUint16(8, files.length, true); edv.setUint16(10, files.length, true);
+  edv.setUint32(12, centralSize, true); edv.setUint32(16, centralOffset, true); edv.setUint16(20, 0, true);
+  const total = chunks.reduce((a, c) => a + c.length, 0) + centralSize + 22; const all = new Uint8Array(total); let pos = 0;
+  for (const c of chunks) { all.set(c, pos); pos += c.length; }
+  for (const c of central) { all.set(c, pos); pos += c.length; }
+  all.set(end, pos);
+  return new Blob([all], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
+function mdToDocx(md) {
+  const escXml = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const body = [];
+  for (const raw of md.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) { body.push('<w:p/>'); continue; }
+    let text = line, bold = false, size = null;
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) { bold = true; size = h[1].length === 1 ? 18 : h[1].length === 2 ? 15 : 13; text = h[2]; }
+    else if (/^工作汇报/.test(line) || /^【/.test(line)) { bold = true; size = 15; }
+    const cm = line.match(/^[-*]\s+\[([ x])\]\s+(.*)$/);
+    if (cm) text = '• ' + (cm[1] === 'x' ? '✅ ' : '⬜ ') + cm[2];
+    else { const m = line.match(/^[-*]\s+(.*)$/); if (m) text = '• ' + m[1]; }
+    text = text.replace(/^\[x\]\s*/, '✅ ').replace(/^\[ \]\s*/, '⬜ ').replace(/^>\s?/, '');
+    const rpr = bold ? `<w:rPr><w:b/>${size ? `<w:sz w:val="${size * 2}"/>` : ''}</w:rPr>` : '';
+    body.push(`<w:p><w:r>${rpr}<w:t xml:space="preserve">${escXml(text)}</w:t></w:r></w:p>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}<w:sectPr/></w:body></w:document>`;
+}
+function buildDocx(md) {
+  const enc = new TextEncoder();
+  const files = [
+    { name: '[Content_Types].xml', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>') },
+    { name: '_rels/.rels', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>') },
+    { name: 'word/document.xml', data: enc.encode(mdToDocx(md)) },
+  ];
+  return buildZip(files);
+}
+let lastReport = { md: '', name: '', docxName: '' };
 
 /* ---------- 示例数据 ---------- */
 const SAMPLE_RECIPES = [
@@ -333,53 +394,104 @@ function dateRange(type, base = new Date()) {
 }
 function openReport() {
   const types = [['half', '半月报'], ['month', '月报'], ['quarter', '季报'], ['year', '年报']];
+  const now = new Date(); const y = now.getFullYear(), m = now.getMonth() + 1;
+  const ms = String(m).padStart(2, '0');
+  const monthStart = `${y}-${ms}-01`;
+  const monthEnd = `${y}-${ms}-${String(daysInMonth(y, m - 1)).padStart(2, '0')}`;
   openModal(`<h2>📊 工作汇报</h2>
-    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，自动汇总该时段「重要 / 日常」任务的完成情况，方便季度与年度总结。</p>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，自动汇总该时段<strong>全部工作任务</strong>的完成情况（按分类 / 按日期），可导出 Markdown 或 Word 文件。</p>
     <div class="row" id="repTypes">
       ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
-      <button class="btn sm ghost" data-act="report-gen" data-range="custom">自定义</button>
     </div>
-    <div class="row" id="repCustom" style="display:none">
-      <label>起 <input type="date" class="field" id="repS" style="width:150px"></label>
-      <label>止 <input type="date" class="field" id="repE" style="width:150px"></label>
-      <button class="btn primary sm" data-act="report-gen" data-range="custom">生成</button>
+    <div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap">
+      <span class="ch-sub">自定义区间：</span>
+      <label>起 <input type="date" class="field" id="repS" value="${monthStart}" style="width:150px"></label>
+      <label>止 <input type="date" class="field" id="repE" value="${monthEnd}" style="width:150px"></label>
+      <button class="btn primary sm" data-act="report-gen-custom">生成</button>
     </div>
-    <div id="repOut"></div>`);
+    <div id="repOut" style="margin-top:10px"></div>`);
+  // 防止点日期控件时冒泡误触关闭弹窗
+  ['repS', 'repE'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
-function genReport(range) {
-  let r;
+function genReport(range, custom) {
+  let r, label;
   if (range === 'custom') {
-    const s = $('#repS').value, e = $('#repE').value;
-    if (!s || !e) { toast('请选择起止日期'); return; }
-    r = { s, e };
+    if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
+    r = { s: custom.s, e: custom.e }; label = '自定义';
   } else {
     r = dateRange(range);
+    label = { half: '半月报', month: '月报', quarter: '季报', year: '年报' }[range] || '汇报';
   }
+  if (!r) { toast('区间无效'); return; }
   const all = [];
   Object.keys(state.work.todos).forEach(d => {
     if (d >= r.s && d <= r.e) state.work.todos[d].forEach(t => all.push(Object.assign({ date: d }, t)));
   });
+  all.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   const imp = all.filter(t => t.prio === 'important');
   const daily = all.filter(t => t.prio === 'daily');
+  const done = all.filter(t => t.done).length;
+  const rate = all.length ? Math.round(done / all.length * 100) : 0;
   const impDone = imp.filter(t => t.done).length;
   const dailyDone = daily.filter(t => t.done).length;
-  const out = `
+  const catStats = {}; CATS.forEach(c => catStats[c] = { total: 0, done: 0 });
+  all.forEach(t => { const c = t.cat || '未分类'; if (!catStats[c]) catStats[c] = { total: 0, done: 0 }; catStats[c].total++; if (t.done) catStats[c].done++; });
+  const busiest = Object.entries(catStats).filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total)[0];
+  const days = new Set(all.map(t => t.date)).size;
+  const byDate = {}; all.forEach(t => { (byDate[t.date] = byDate[t.date] || []).push(t); });
+
+  const L = [];
+  L.push(`# 工作汇报（${label}）${r.s} ~ ${r.e}`);
+  L.push('');
+  L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
+  L.push('');
+  L.push('## 概览');
+  L.push(`- 统计区间：${r.s} 至 ${r.e}（共 ${days} 天有记录）`);
+  L.push(`- 任务总数：${all.length}`);
+  L.push(`- 已完成：${done}（完成率 ${rate}%）`);
+  L.push(`- 重要任务：${imp.length} 项，已完成 ${impDone} 项`);
+  L.push(`- 日常任务：${daily.length} 项，已完成 ${dailyDone} 项`);
+  L.push('');
+  L.push('## 按分类汇总');
+  Object.entries(catStats).forEach(([c, s]) => L.push(`- ${c}：${s.total} 项，完成 ${s.done} 项`));
+  L.push('');
+  L.push('## ⭐ 重要任务清单（季度 / 年度总结用）');
+  if (imp.length) imp.forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} [${t.cat || '未分类'}] ${t.date}`));
+  else L.push('（该区间没有标记为「重要」的任务）');
+  L.push('');
+  L.push('## 📅 全部任务（按日期）');
+  Object.keys(byDate).sort().forEach(d => {
+    L.push(`### ${d}`);
+    byDate[d].forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} [${t.cat || '未分类'}] ${t.prio === 'important' ? '重要' : '日常'}`));
+  });
+  L.push('');
+  let narr = `本期共记录 ${all.length} 项工作，完成 ${done} 项，整体完成率 ${rate}%。`;
+  if (busiest) narr += `其中「${busiest[0]}」类任务最活跃（${busiest[1].total} 项）。`;
+  if (imp.length) narr += `重要任务完成 ${impDone}/${imp.length} 项${impDone === imp.length && imp.length ? '，全部达成 👍' : ''}。`;
+  if (!all.length) narr = '该区间暂无任何工作记录，先去「工作」分栏记几笔吧。';
+  L.push('## 小结');
+  L.push(narr);
+  const md = L.join('\n');
+
+  lastReport = { md, name: `工作汇报_${label}_${r.s}_${r.e}.md`, docxName: `工作汇报_${label}_${r.s}_${r.e}.docx` };
+  const outHtml = `
     <div class="report-summary">
       <div class="stat-row">
         <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
+        <div class="stat"><div class="num">${rate}%</div><div class="lab">完成率</div></div>
         <div class="stat"><div class="num">${imp.length}</div><div class="lab">重要任务</div></div>
-        <div class="stat"><div class="num">${impDone}/${imp.length}</div><div class="lab">重要完成</div></div>
-        <div class="stat"><div class="num">${dailyDone}/${daily.length}</div><div class="lab">日常完成</div></div>
+        <div class="stat"><div class="num">${daily.length}</div><div class="lab">日常任务</div></div>
       </div>
-      <strong style="font-size:14px">⭐ 重要任务清单（用于季度 / 年度总结）</strong>
-      ${imp.length ? `<ul class="report-list">${imp.map(t => `<li><span>${t.done ? '✅' : '⬜'}</span><span><b>${esc(t.text)}</b> <span class="pill gray">${esc(t.cat)}</span> <span class="pill gray">${t.date}</span></span></li>`).join('')}</ul>`
-        : '<p style="color:var(--ink-soft);font-size:13px">该区间没有标记为「重要」的任务。</p>'}
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。下方为报告预览，可导出 Markdown 或 Word(.docx) 文件。</p>
+      <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:320px;overflow:auto">${esc(md)}</pre>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sm yellow" data-act="report-export">⬇ 导出 Markdown</button>
+      <button class="btn sm" data-act="report-export-docx">⬇ 导出 Word (.docx)</button>
+      <button class="btn sm ghost" data-act="report-copy">📋 复制全文</button>
     </div>`;
-  const payload = `工作汇报（${r.s} ~ ${r.e}）\n重要完成 ${impDone}/${imp.length}，日常完成 ${dailyDone}/${daily.length}\n\n【重要任务清单】\n` +
-    (imp.length ? imp.map(t => `${t.done ? '✅' : '⬜'} ${t.text} [${t.cat}] ${t.date}`).join('\n') : '（无）');
-  lastReport = { text: payload, name: `工作汇报_${r.s}_${r.e}.md` };
-  $('#repOut').innerHTML = out + `<div style="margin-top:12px"><button class="btn sm ghost" data-act="report-copy">📋 复制摘要</button> <button class="btn sm yellow" data-act="report-export">⬇ 导出文件</button></div>`;
-  $('#repOut').dataset.payload = payload;
+  $('#repOut').innerHTML = outHtml;
+  $('#repOut').dataset.payload = md;
 }
 
 /* =================== 英语 =================== */
@@ -748,17 +860,24 @@ $('#view').addEventListener('click', e => {
     const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
   }
   else if (act === 'report-open') openReport();
-  else if (act === 'report-gen') {
-    const r = el.dataset.range;
-    if (r === 'custom') { $('#repCustom').style.display = 'flex'; return; }
-    genReport(r);
+  else if (act === 'report-gen') genReport(el.dataset.range);
+  else if (act === 'report-gen-custom') {
+    const s = $('#repS').value, e = $('#repE').value;
+    if (!s || !e) { toast('请选择起止日期'); return; }
+    genReport('custom', { s, e });
   }
   else if (act === 'report-copy') {
     const payload = $('#repOut').dataset.payload || '';
-    navigator.clipboard?.writeText(payload).then(() => toast('已复制摘要')).catch(() => toast('复制失败'));
+    navigator.clipboard?.writeText(payload).then(() => toast('已复制全文')).catch(() => toast('复制失败'));
   }
   else if (act === 'report-export') {
-    if (lastReport.text) { download(lastReport.name, lastReport.text); toast('已导出报告文件'); }
+    if (!lastReport.md) { toast('请先生成报告'); return; }
+    download(lastReport.name, lastReport.md, 'text/markdown'); toast('已导出 Markdown');
+  }
+  else if (act === 'report-export-docx') {
+    if (!lastReport.md) { toast('请先生成报告'); return; }
+    download(lastReport.docxName, buildDocx(lastReport.md), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    toast('已导出 Word 文档');
   }
   else if (act === 'quiz-open') { openQuiz(); }
   else if (act === 'know-filter') { knowFilter = el.dataset.tag; viewFinance($('#view')); }
