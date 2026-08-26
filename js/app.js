@@ -494,6 +494,29 @@ function genReport(range, custom) {
   $('#repOut').dataset.payload = md;
 }
 
+/* 报告动作统一处理（#view 与 #modalRoot 共用：弹窗按钮渲染在 #modalRoot，不在 #view 内） */
+function handleReport(act, el) {
+  if (act === 'report-gen') { genReport(el.dataset.range); }
+  else if (act === 'report-gen-custom') {
+    const s = $('#repS').value, e = $('#repE').value;
+    if (!s || !e) { toast('请选择起止日期'); return; }
+    genReport('custom', { s, e });
+  }
+  else if (act === 'report-copy') {
+    const payload = $('#repOut').dataset.payload || '';
+    navigator.clipboard?.writeText(payload).then(() => toast('已复制全文')).catch(() => toast('复制失败'));
+  }
+  else if (act === 'report-export') {
+    if (!lastReport.md) { toast('请先生成报告'); return; }
+    download(lastReport.name, lastReport.md, 'text/markdown'); toast('已导出 Markdown');
+  }
+  else if (act === 'report-export-docx') {
+    if (!lastReport.md) { toast('请先生成报告'); return; }
+    download(lastReport.docxName, buildDocx(lastReport.md), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    toast('已导出 Word 文档');
+  }
+}
+
 /* =================== 英语 =================== */
 function enStreak() {
   let streak = 0; const d = new Date();
@@ -860,25 +883,7 @@ $('#view').addEventListener('click', e => {
     const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
   }
   else if (act === 'report-open') openReport();
-  else if (act === 'report-gen') genReport(el.dataset.range);
-  else if (act === 'report-gen-custom') {
-    const s = $('#repS').value, e = $('#repE').value;
-    if (!s || !e) { toast('请选择起止日期'); return; }
-    genReport('custom', { s, e });
-  }
-  else if (act === 'report-copy') {
-    const payload = $('#repOut').dataset.payload || '';
-    navigator.clipboard?.writeText(payload).then(() => toast('已复制全文')).catch(() => toast('复制失败'));
-  }
-  else if (act === 'report-export') {
-    if (!lastReport.md) { toast('请先生成报告'); return; }
-    download(lastReport.name, lastReport.md, 'text/markdown'); toast('已导出 Markdown');
-  }
-  else if (act === 'report-export-docx') {
-    if (!lastReport.md) { toast('请先生成报告'); return; }
-    download(lastReport.docxName, buildDocx(lastReport.md), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    toast('已导出 Word 文档');
-  }
+  else if (['report-gen', 'report-gen-custom', 'report-copy', 'report-export', 'report-export-docx'].includes(act)) handleReport(act, el);
   else if (act === 'quiz-open') { openQuiz(); }
   else if (act === 'know-filter') { knowFilter = el.dataset.tag; viewFinance($('#view')); }
   else if (act === 'recipe-filter') { recipeFilter = el.dataset.meal; viewRecipes($('#view')); }
@@ -1020,6 +1025,7 @@ $('#modalRoot').addEventListener('click', e => {
     save(true);
     syncNow();
   }
+  handleReport(act, el);
 });
 $('#modalRoot').addEventListener('click', e => {
   const em = e.target.closest('#emojiPick .chip');
