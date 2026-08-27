@@ -156,6 +156,8 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .todo-meta{display:flex; gap:6px; align-items:center;}
 .todo-del{color:var(--ink-faint); font-size:16px; width:26px;height:26px;border-radius:9px; display:grid;place-items:center;}
 .todo-del:hover{background:var(--danger); color:#fff;}
+.todo-edit{color:var(--ink-faint); font-size:16px; width:26px;height:26px;border-radius:9px; display:grid;place-items:center; cursor:pointer;}
+.todo-edit:hover{background:rgba(0,0,0,.07); color:var(--ink);}
 
 .empty{text-align:center; color:var(--ink-faint); padding:30px 10px; font-size:14px;}
 
