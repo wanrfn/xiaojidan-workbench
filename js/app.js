@@ -357,6 +357,7 @@ function todoRow(tk) {
     <div class="todo-check" data-act="todo-toggle" data-id="${tk.id}" data-date="${tk.date}">${tk.done ? '✓' : ''}</div>
     <div class="todo-text">${esc(tk.text)}</div>
     <div class="todo-meta">${catPill}${prioPill}</div>
+    <div class="todo-edit" data-act="todo-edit" data-id="${tk.id}" data-date="${tk.date}" title="修改">✏️</div>
     <div class="todo-del" data-act="todo-del" data-id="${tk.id}" data-date="${tk.date}">🗑</div>
   </div>`;
 }
@@ -879,6 +880,17 @@ $('#view').addEventListener('click', e => {
     state.work.todos[date] = (state.work.todos[date] || []).filter(x => x.id !== id);
     save(); viewWork($('#view'));
   }
+  else if (act === 'todo-edit') {
+    const { id, date } = el.dataset;
+    const item = (state.work.todos[date] || []).find(x => x.id === id);
+    if (!item) { toast('任务不存在'); return; }
+    openModal(`<h2>✏️ 修改任务</h2>
+      <div class="row"><label>内容</label><textarea class="field" id="editText" rows="2" style="flex:1">${esc(item.text)}</textarea></div>
+      <div class="row"><label>分类</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
+      <div class="row"><label>优先级</label><div class="seg" id="editPrio"><button data-prio="important" class="${item.prio === 'important' ? 'on' : ''}">⭐ 重要</button><button data-prio="daily" class="${item.prio === 'daily' ? 'on' : ''}">🌀 日常</button></div></div>
+      <div class="row"><label>日期</label><input type="date" class="field" id="editDate" value="${item.date}"></div>
+      <div class="row"><button class="btn primary" data-act="todo-edit-do" data-id="${id}" data-date="${date}">保存</button></div>`);
+  }
   else if (act === 'day-toggle') {
     const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
   }
@@ -968,6 +980,8 @@ $('#modalRoot').addEventListener('click', e => {
     $$('#quizBox .quiz-opt').forEach(o => { if (o.dataset.q === q) o.classList.remove('on'); });
     opt.classList.add('on'); quizSel[q] = Number(opt.dataset.v); return;
   }
+  const segBtn = e.target.closest('.seg button');
+  if (segBtn) { const g = segBtn.closest('.seg'); $$('button', g).forEach(b => b.classList.remove('on')); segBtn.classList.add('on'); return; }
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act;
   if (act === 'quiz-calc') {
@@ -1024,6 +1038,21 @@ $('#modalRoot').addEventListener('click', e => {
     }
     save(true);
     syncNow();
+  }
+  if (act === 'todo-edit-do') {
+    const id = el.dataset.id, odate = el.dataset.date;
+    const text = ($('#editText').value || '').trim();
+    if (!text) { toast('内容不能为空'); return; }
+    const cat = ($('#editCat .on') || {}).dataset?.cat || CATS[0];
+    const prio = ($('#editPrio .on') || {}).dataset?.prio || 'important';
+    const ndate = ($('#editDate').value || odate).trim();
+    const arr = state.work.todos[odate] || [];
+    const idx = arr.findIndex(x => x.id === id);
+    if (idx < 0) { toast('任务不存在'); return; }
+    const item = arr[idx];
+    item.text = text; item.cat = cat; item.prio = prio;
+    if (ndate !== odate) { item.date = ndate; arr.splice(idx, 1); (state.work.todos[ndate] = state.work.todos[ndate] || []).push(item); }
+    save(); closeModal(); viewWork($('#view')); toast('已保存');
   }
   handleReport(act, el);
 });
