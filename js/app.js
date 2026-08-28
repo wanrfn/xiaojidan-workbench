@@ -440,38 +440,85 @@ function genReport(range, custom) {
   const busiest = Object.entries(catStats).filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total)[0];
   const days = new Set(all.map(t => t.date)).size;
   const byDate = {}; all.forEach(t => { (byDate[t.date] = byDate[t.date] || []).push(t); });
+  const completedImp = imp.filter(t => t.done);
+  const impOpen = imp.filter(t => !t.done);
+  const open = all.filter(t => !t.done);
+  const activeCats = Object.entries(catStats).filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total);
+  const impRate = imp.length ? Math.round(impDone / imp.length * 100) : 0;
 
   const L = [];
-  L.push(`# 工作汇报（${label}）${r.s} ~ ${r.e}`);
+  L.push(`# 工作汇报（${label}）`);
   L.push('');
+  L.push(`> 统计区间：**${r.s} 至 ${r.e}**（共 ${days} 天有记录）`);
   L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
   L.push('');
-  L.push('## 概览');
-  L.push(`- 统计区间：${r.s} 至 ${r.e}（共 ${days} 天有记录）`);
-  L.push(`- 任务总数：${all.length}`);
-  L.push(`- 已完成：${done}（完成率 ${rate}%）`);
-  L.push(`- 重要任务：${imp.length} 项，已完成 ${impDone} 项`);
+  // 一、概览
+  L.push('## 一、概览');
+  L.push(`- 任务总数：**${all.length}** 项`);
+  L.push(`- 已完成：${done} 项，完成率 **${rate}%**`);
+  L.push(`- 重要任务：${imp.length} 项，已完成 ${impDone} 项（${impRate}%）`);
   L.push(`- 日常任务：${daily.length} 项，已完成 ${dailyDone} 项`);
+  if (busiest) L.push(`- 最活跃分类：「${busiest[0]}」${busiest[1].total} 项`);
   L.push('');
-  L.push('## 按分类汇总');
-  Object.entries(catStats).forEach(([c, s]) => L.push(`- ${c}：${s.total} 项，完成 ${s.done} 项`));
+  // 二、重点成果（已完成的重要任务）
+  L.push('## 二、重点成果（已完成的重要任务）');
+  if (completedImp.length) completedImp.forEach(t => L.push(`- ✅ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
+  else L.push('（本期暂无已完成的「重要」任务）');
   L.push('');
-  L.push('## ⭐ 重要任务清单（季度 / 年度总结用）');
-  if (imp.length) imp.forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} [${t.cat || '未分类'}] ${t.date}`));
-  else L.push('（该区间没有标记为「重要」的任务）');
+  // 三、按分类汇总
+  L.push('## 三、按分类汇总');
+  if (activeCats.length) activeCats.forEach(([c, s]) => {
+    const rr = s.total ? Math.round(s.done / s.total * 100) : 0;
+    L.push(`- **${c}**：${s.total} 项，完成 ${s.done} 项（${rr}%）`);
+  });
+  else L.push('（该区间没有任务记录）');
   L.push('');
-  L.push('## 📅 全部任务（按日期）');
+  // 四、待跟进 / 未完成事项
+  L.push('## 四、待跟进 / 未完成事项');
+  if (open.length) {
+    if (impOpen.length) {
+      L.push('**未完成的重要任务：**');
+      impOpen.forEach(t => L.push(`- ⬜ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
+    }
+    const dailyOpen = open.filter(t => t.prio === 'daily');
+    if (dailyOpen.length) {
+      L.push('**未完成的日常任务：**');
+      dailyOpen.forEach(t => L.push(`- ⬜ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
+    }
+  } else {
+    L.push('✅ 本期任务已全部完成，无待跟进事项。');
+  }
+  L.push('');
+  // 五、工作明细（按日期，备查）
+  L.push('## 五、工作明细（按日期，备查）');
   Object.keys(byDate).sort().forEach(d => {
     L.push(`### ${d}`);
-    byDate[d].forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} [${t.cat || '未分类'}] ${t.prio === 'important' ? '重要' : '日常'}`));
+    byDate[d].forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} 〔${t.cat || '未分类'} · ${t.prio === 'important' ? '重要' : '日常'}〕`));
   });
   L.push('');
-  let narr = `本期共记录 ${all.length} 项工作，完成 ${done} 项，整体完成率 ${rate}%。`;
-  if (busiest) narr += `其中「${busiest[0]}」类任务最活跃（${busiest[1].total} 项）。`;
-  if (imp.length) narr += `重要任务完成 ${impDone}/${imp.length} 项${impDone === imp.length && imp.length ? '，全部达成 👍' : ''}。`;
-  if (!all.length) narr = '该区间暂无任何工作记录，先去「工作」分栏记几笔吧。';
-  L.push('## 小结');
-  L.push(narr);
+  // 六、本期小结（实质分析，针对本期内容）
+  L.push('## 六、本期小结');
+  if (!all.length) {
+    L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
+  } else {
+    const pace = rate >= 80 ? '总体推进顺畅，节奏稳健。' : rate >= 50 ? '进度已过大半，仍有部分事项待收尾。' : '未完成事项占比较高，建议下阶段集中清理。';
+    L.push(`本期共记录 ${all.length} 项工作，完成 ${done} 项，整体完成率 ${rate}%。${pace}`);
+    if (busiest) L.push(`工作重心集中在「${busiest[0]}」类（${busiest[1].total} 项），是本期主要投入方向。`);
+    if (completedImp.length) {
+      const top = completedImp.slice(0, 3).map(t => `「${t.text}」`).join('、');
+      L.push(`重点成果方面，${completedImp.length} 项重要任务已落地，代表性成果包括 ${top}。`);
+    } else if (imp.length) {
+      L.push(`本期标记了 ${imp.length} 项重要任务，但尚未有完成记录，需持续跟进。`);
+    }
+    if (impOpen.length) {
+      const pend = impOpen.slice(0, 3).map(t => `「${t.text}」`).join('、');
+      L.push(`仍有 ${impOpen.length} 项重要任务未完成（如 ${pend}），建议作为下阶段优先推进项。`);
+    } else if (imp.length) {
+      L.push('重要任务已全部完成，阶段性目标达成 👍。');
+    }
+    const pendingDaily = open.filter(t => t.prio === 'daily').length;
+    if (pendingDaily) L.push(`另有 ${pendingDaily} 项日常任务待处理，多为常规性工作，可按既定节奏推进。`);
+  }
   const md = L.join('\n');
 
   lastReport = { md, name: `工作汇报_${label}_${r.s}_${r.e}.md`, docxName: `工作汇报_${label}_${r.s}_${r.e}.docx` };
@@ -481,10 +528,10 @@ function genReport(range, custom) {
         <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
         <div class="stat"><div class="num">${rate}%</div><div class="lab">完成率</div></div>
         <div class="stat"><div class="num">${imp.length}</div><div class="lab">重要任务</div></div>
-        <div class="stat"><div class="num">${daily.length}</div><div class="lab">日常任务</div></div>
+        <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。下方为报告预览，可导出 Markdown 或 Word(.docx) 文件。</p>
-      <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:320px;overflow:auto">${esc(md)}</pre>
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。报告结构：概览 → 重点成果 → 按分类汇总 → 待跟进事项 → 按日期明细（备查）→ 本期小结。可导出 Markdown 或 Word(.docx)。</p>
+      <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:340px;overflow:auto">${esc(md)}</pre>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sm yellow" data-act="report-export">⬇ 导出 Markdown</button>
