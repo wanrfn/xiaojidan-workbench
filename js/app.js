@@ -376,6 +376,13 @@ function historyDay(d) {
 /* ---------- 报告 ---------- */
 function dateRange(type, base = new Date()) {
   const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  if (type === 'week') {
+    const dow = base.getDay(); // 0=Sun..6=Sat
+    const mon = new Date(base); mon.setDate(d - ((dow + 6) % 7));
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    const f = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    return { s: f(mon), e: f(sun) };
+  }
   if (type === 'half') {
     if (d <= 15) return { s: `${y}-${String(m + 1).padStart(2, '0')}-01`, e: `${y}-${String(m + 1).padStart(2, '0')}-15` };
     const ld = daysInMonth(y, m);
@@ -394,13 +401,13 @@ function dateRange(type, base = new Date()) {
   return null;
 }
 function openReport() {
-  const types = [['half', '半月报'], ['month', '月报'], ['quarter', '季报'], ['year', '年报']];
+  const types = [['week', '周报'], ['half', '半月报'], ['month', '月报'], ['quarter', '季报'], ['year', '年报']];
   const now = new Date(); const y = now.getFullYear(), m = now.getMonth() + 1;
   const ms = String(m).padStart(2, '0');
   const monthStart = `${y}-${ms}-01`;
   const monthEnd = `${y}-${ms}-${String(daysInMonth(y, m - 1)).padStart(2, '0')}`;
   openModal(`<h2>📊 工作汇报</h2>
-    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，自动汇总该时段<strong>全部工作任务</strong>的完成情况（按分类 / 按日期），可导出 Markdown 或 Word 文件。</p>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，按你的模板汇总：<strong>4.本周/本期工作（组内 · 科室 · 部门）</strong> → <strong>5.下周/下阶段工作计划</strong>（未完成事项自动转为计划）。可导出 Markdown 或 Word 文件。</p>
     <div class="row" id="repTypes">
       ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
     </div>
@@ -415,13 +422,21 @@ function openReport() {
   ['repS', 'repE'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
 function genReport(range, custom) {
-  let r, label;
+  let r, label, scope;
   if (range === 'custom') {
     if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
-    r = { s: custom.s, e: custom.e }; label = '自定义';
+    r = { s: custom.s, e: custom.e }; label = '工作汇报';
+    scope = { work: '本期工作', plan: '下阶段工作计划与目标' };
   } else {
     r = dateRange(range);
-    label = { half: '半月报', month: '月报', quarter: '季报', year: '年报' }[range] || '汇报';
+    const M = {
+      week:    { title: '工作周报', work: '本周工作', plan: '下周工作计划与目标' },
+      half:    { title: '工作半月报', work: '本期工作', plan: '下阶段工作计划与目标' },
+      month:   { title: '工作月报', work: '本月工作', plan: '下月工作计划与目标' },
+      quarter: { title: '工作季报', work: '本季工作', plan: '下季工作计划与目标' },
+      year:    { title: '工作年报', work: '本年工作', plan: '明年工作计划与目标' },
+    };
+    label = M[range].title; scope = { work: M[range].work, plan: M[range].plan };
   }
   if (!r) { toast('区间无效'); return; }
   const all = [];
@@ -429,96 +444,37 @@ function genReport(range, custom) {
     if (d >= r.s && d <= r.e) state.work.todos[d].forEach(t => all.push(Object.assign({ date: d }, t)));
   });
   all.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-  const imp = all.filter(t => t.prio === 'important');
-  const daily = all.filter(t => t.prio === 'daily');
   const done = all.filter(t => t.done).length;
   const rate = all.length ? Math.round(done / all.length * 100) : 0;
-  const impDone = imp.filter(t => t.done).length;
-  const dailyDone = daily.filter(t => t.done).length;
-  const catStats = {}; CATS.forEach(c => catStats[c] = { total: 0, done: 0 });
-  all.forEach(t => { const c = t.cat || '未分类'; if (!catStats[c]) catStats[c] = { total: 0, done: 0 }; catStats[c].total++; if (t.done) catStats[c].done++; });
-  const busiest = Object.entries(catStats).filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total)[0];
-  const days = new Set(all.map(t => t.date)).size;
-  const byDate = {}; all.forEach(t => { (byDate[t.date] = byDate[t.date] || []).push(t); });
-  const completedImp = imp.filter(t => t.done);
-  const impOpen = imp.filter(t => !t.done);
   const open = all.filter(t => !t.done);
-  const activeCats = Object.entries(catStats).filter(([, s]) => s.total > 0).sort((a, b) => b[1].total - a[1].total);
-  const impRate = imp.length ? Math.round(impDone / imp.length * 100) : 0;
+  const days = new Set(all.map(t => t.date)).size;
+  const catLabel = { '组内': '组内管理工作', '科室': '科室工作', '部门': '部门工作' };
+  const catOrder = ['组内', '科室', '部门'];
+  const byCat = {}; catOrder.forEach(c => byCat[c] = []);
+  all.forEach(t => { const c = t.cat || '未分类'; (byCat[c] = byCat[c] || []).push(t); });
+  const extraCats = Object.keys(byCat).filter(c => !catOrder.includes(c));
 
   const L = [];
-  L.push(`# 工作汇报（${label}）`);
+  L.push(`# ${label}`);
   L.push('');
-  L.push(`> 统计区间：**${r.s} 至 ${r.e}**（共 ${days} 天有记录）`);
+  L.push(`> 统计区间：**${r.s} 至 ${r.e}**　|　共 ${days} 天有记录`);
   L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
   L.push('');
-  // 一、概览
-  L.push('## 一、概览');
-  L.push(`- 任务总数：**${all.length}** 项`);
-  L.push(`- 已完成：${done} 项，完成率 **${rate}%**`);
-  L.push(`- 重要任务：${imp.length} 项，已完成 ${impDone} 项（${impRate}%）`);
-  L.push(`- 日常任务：${daily.length} 项，已完成 ${dailyDone} 项`);
-  if (busiest) L.push(`- 最活跃分类：「${busiest[0]}」${busiest[1].total} 项`);
+  if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
+  else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
   L.push('');
-  // 二、重点成果（已完成的重要任务）
-  L.push('## 二、重点成果（已完成的重要任务）');
-  if (completedImp.length) completedImp.forEach(t => L.push(`- ✅ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
-  else L.push('（本期暂无已完成的「重要」任务）');
-  L.push('');
-  // 三、按分类汇总
-  L.push('## 三、按分类汇总');
-  if (activeCats.length) activeCats.forEach(([c, s]) => {
-    const rr = s.total ? Math.round(s.done / s.total * 100) : 0;
-    L.push(`- **${c}**：${s.total} 项，完成 ${s.done} 项（${rr}%）`);
-  });
-  else L.push('（该区间没有任务记录）');
-  L.push('');
-  // 四、待跟进 / 未完成事项
-  L.push('## 四、待跟进 / 未完成事项');
-  if (open.length) {
-    if (impOpen.length) {
-      L.push('**未完成的重要任务：**');
-      impOpen.forEach(t => L.push(`- ⬜ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
-    }
-    const dailyOpen = open.filter(t => t.prio === 'daily');
-    if (dailyOpen.length) {
-      L.push('**未完成的日常任务：**');
-      dailyOpen.forEach(t => L.push(`- ⬜ ${t.text} 〔${t.cat || '未分类'} · ${t.date}〕`));
-    }
-  } else {
-    L.push('✅ 本期任务已全部完成，无待跟进事项。');
-  }
-  L.push('');
-  // 五、工作明细（按日期，备查）
-  L.push('## 五、工作明细（按日期，备查）');
-  Object.keys(byDate).sort().forEach(d => {
-    L.push(`### ${d}`);
-    byDate[d].forEach(t => L.push(`- [${t.done ? 'x' : ' '}] ${t.text} 〔${t.cat || '未分类'} · ${t.prio === 'important' ? '重要' : '日常'}〕`));
+  // 4. 本周/本期工作（按你的模板，归纳到 组内/科室/部门）
+  L.push(`4.${scope.work}：`);
+  catOrder.concat(extraCats).forEach(c => {
+    const items = byCat[c]; if (!items || !items.length) return;
+    L.push(`○${catLabel[c] || c}：`);
+    items.forEach(t => L.push(`- ${t.text} · ${t.date}${t.done ? ' ✓' : '（未完成）'}`));
   });
   L.push('');
-  // 六、本期小结（实质分析，针对本期内容）
-  L.push('## 六、本期小结');
-  if (!all.length) {
-    L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
-  } else {
-    const pace = rate >= 80 ? '总体推进顺畅，节奏稳健。' : rate >= 50 ? '进度已过大半，仍有部分事项待收尾。' : '未完成事项占比较高，建议下阶段集中清理。';
-    L.push(`本期共记录 ${all.length} 项工作，完成 ${done} 项，整体完成率 ${rate}%。${pace}`);
-    if (busiest) L.push(`工作重心集中在「${busiest[0]}」类（${busiest[1].total} 项），是本期主要投入方向。`);
-    if (completedImp.length) {
-      const top = completedImp.slice(0, 3).map(t => `「${t.text}」`).join('、');
-      L.push(`重点成果方面，${completedImp.length} 项重要任务已落地，代表性成果包括 ${top}。`);
-    } else if (imp.length) {
-      L.push(`本期标记了 ${imp.length} 项重要任务，但尚未有完成记录，需持续跟进。`);
-    }
-    if (impOpen.length) {
-      const pend = impOpen.slice(0, 3).map(t => `「${t.text}」`).join('、');
-      L.push(`仍有 ${impOpen.length} 项重要任务未完成（如 ${pend}），建议作为下阶段优先推进项。`);
-    } else if (imp.length) {
-      L.push('重要任务已全部完成，阶段性目标达成 👍。');
-    }
-    const pendingDaily = open.filter(t => t.prio === 'daily').length;
-    if (pendingDaily) L.push(`另有 ${pendingDaily} 项日常任务待处理，多为常规性工作，可按既定节奏推进。`);
-  }
+  // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划）
+  L.push(`5.${scope.plan}：`);
+  if (open.length) open.forEach(t => L.push(`- ${t.text}（${t.cat || '未分类'} · 原定 ${t.date}）`));
+  else L.push('- （本期任务已全部完成，可在此补充新目标）');
   const md = L.join('\n');
 
   lastReport = { md, name: `工作汇报_${label}_${r.s}_${r.e}.md`, docxName: `工作汇报_${label}_${r.s}_${r.e}.docx` };
@@ -527,10 +483,10 @@ function genReport(range, custom) {
       <div class="stat-row">
         <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
         <div class="stat"><div class="num">${rate}%</div><div class="lab">完成率</div></div>
-        <div class="stat"><div class="num">${imp.length}</div><div class="lab">重要任务</div></div>
+        <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
         <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。报告结构：概览 → 重点成果 → 按分类汇总 → 待跟进事项 → 按日期明细（备查）→ 本期小结。可导出 Markdown 或 Word(.docx)。</p>
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。已按你的模板生成：4.本周/本期工作（组内 · 科室 · 部门）→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
       <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:340px;overflow:auto">${esc(md)}</pre>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
