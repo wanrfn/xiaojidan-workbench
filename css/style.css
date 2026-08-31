@@ -125,7 +125,7 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 /* ============ 工作 To do ============ */
 .todo-add{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
 .todo-add .field{flex:1; min-width:180px;}
-.seg{display:inline-flex; background:var(--green-50); border-radius:13px; padding:4px; gap:4px;}
+.seg{display:inline-flex; flex-wrap:wrap; background:var(--green-50); border-radius:13px; padding:4px; gap:4px;}
 .seg button{padding:7px 13px; border-radius:10px; font-weight:700; font-size:13px; color:var(--ink-soft);}
 .seg button.on{background:#fff; color:var(--green-500); box-shadow:var(--shadow-sm);}
 
