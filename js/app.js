@@ -288,7 +288,7 @@ function renderView() {
 }
 
 /* =================== 工作 =================== */
-const CATS = ['组内', '科室', '部门'];
+const CATS = ['组内', '科室', '部门', '面试', '项目对接', '日常管理', '特殊任务', '其他'];
 function ensureToday() {
   const t = todayStr();
   if (!state.work.todos[t]) { state.work.todos[t] = []; save(); }
@@ -299,15 +299,15 @@ function workStats() {
   const today = state.work.todos[t] || [];
   const dow = (now.getDay() + 6) % 7;
   const weekStart = addDays(startOfDay(now), -dow);
-  let wTotal = 0, wDone = 0, iTotal = 0, iDone = 0;
+  let wTotal = 0, wDone = 0, mTotal = 0, mDone = 0;
   Object.keys(state.work.todos).forEach(d => {
     const dd = new Date(d);
     if (dd >= weekStart) { const arr = state.work.todos[d]; wTotal += arr.length; wDone += arr.filter(x => x.done).length; }
     if (dd.getFullYear() === now.getFullYear() && dd.getMonth() === now.getMonth()) {
-      state.work.todos[d].forEach(x => { if (x.prio === 'important') { iTotal++; if (x.done) iDone++; } });
+      const arr = state.work.todos[d]; mTotal += arr.length; mDone += arr.filter(x => x.done).length;
     }
   });
-  return { todayTotal: today.length, todayDone: today.filter(x => x.done).length, wTotal, wDone, iTotal, iDone };
+  return { todayTotal: today.length, todayDone: today.filter(x => x.done).length, wTotal, wDone, mTotal, mDone };
 }
 function viewWork(v) {
   ensureToday();
@@ -321,7 +321,7 @@ function viewWork(v) {
     <div class="stats-row">
       <div class="mini-stat"><div class="n">${st.todayDone}/${st.todayTotal}</div><div class="l">今日完成</div></div>
       <div class="mini-stat"><div class="n">${st.wDone}/${st.wTotal}</div><div class="l">本周完成</div></div>
-      <div class="mini-stat"><div class="n">${st.iDone}/${st.iTotal}</div><div class="l">本月重要</div></div>
+      <div class="mini-stat"><div class="n">${st.mDone}/${st.mTotal}</div><div class="l">本月完成</div></div>
       <div class="mini-stat"><div class="n">${st.wTotal ? Math.round(st.wDone / st.wTotal * 100) : 0}%</div><div class="l">本周完成率</div></div>
     </div>
   </div>
@@ -332,10 +332,6 @@ function viewWork(v) {
       <input class="field" id="todoInput" placeholder="写点今天要做的事…" />
       <div class="seg" id="catSeg">
         ${CATS.map((c, i) => `<button data-cat="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
-      </div>
-      <div class="seg" id="prioSeg">
-        <button data-prio="important" class="on">⭐ 重要</button>
-        <button data-prio="daily">🌀 日常</button>
       </div>
       <button class="btn primary" data-act="todo-add">＋ 添加</button>
     </div>
@@ -351,12 +347,11 @@ function viewWork(v) {
   `;
 }
 function todoRow(tk) {
-  const catPill = `<span class="pill green">${esc(tk.cat)}</span>`;
-  const prioPill = tk.prio === 'important' ? '<span class="pill imp">重要</span>' : '<span class="pill daily">日常</span>';
+  const catPill = `<span class="pill green">${esc(tk.cat || '其他')}</span>`;
   return `<div class="todo-item ${tk.done ? 'done' : ''}" data-id="${tk.id}">
     <div class="todo-check" data-act="todo-toggle" data-id="${tk.id}" data-date="${tk.date}">${tk.done ? '✓' : ''}</div>
     <div class="todo-text">${esc(tk.text)}</div>
-    <div class="todo-meta">${catPill}${prioPill}</div>
+    <div class="todo-meta">${catPill}</div>
     <div class="todo-edit" data-act="todo-edit" data-id="${tk.id}" data-date="${tk.date}" title="修改">✏️</div>
     <div class="todo-del" data-act="todo-del" data-id="${tk.id}" data-date="${tk.date}">🗑</div>
   </div>`;
@@ -449,7 +444,7 @@ function genReport(range, custom) {
   const open = all.filter(t => !t.done);
   const days = new Set(all.map(t => t.date)).size;
   const catLabel = { '组内': '组内管理工作', '科室': '科室工作', '部门': '部门工作' };
-  const catOrder = ['组内', '科室', '部门'];
+  const catOrder = CATS;
   const byCat = {}; catOrder.forEach(c => byCat[c] = []);
   all.forEach(t => { const c = t.cat || '未分类'; (byCat[c] = byCat[c] || []).push(t); });
   const extraCats = Object.keys(byCat).filter(c => !catOrder.includes(c));
@@ -868,9 +863,8 @@ $('#view').addEventListener('click', e => {
     const input = $('#todoInput'); const text = input.value.trim();
     if (!text) { toast('先写点内容'); return; }
     const cat = ($('#catSeg .on') || {}).dataset?.cat || CATS[0];
-    const prio = ($('#prioSeg .on') || {}).dataset?.prio || 'important';
     const t = todayStr();
-    state.work.todos[t].push({ id: uid(), text, cat, prio, done: false, date: t });
+    state.work.todos[t].push({ id: uid(), text, cat, done: false, date: t });
     save(); input.value = ''; viewWork($('#view'));
   }
   else if (act === 'todo-toggle') {
@@ -890,7 +884,6 @@ $('#view').addEventListener('click', e => {
     openModal(`<h2>✏️ 修改任务</h2>
       <div class="row"><label>内容</label><textarea class="field" id="editText" rows="2" style="flex:1">${esc(item.text)}</textarea></div>
       <div class="row"><label>分类</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
-      <div class="row"><label>优先级</label><div class="seg" id="editPrio"><button data-prio="important" class="${item.prio === 'important' ? 'on' : ''}">⭐ 重要</button><button data-prio="daily" class="${item.prio === 'daily' ? 'on' : ''}">🌀 日常</button></div></div>
       <div class="row"><label>日期</label><input type="date" class="field" id="editDate" value="${item.date}"></div>
       <div class="row"><button class="btn primary" data-act="todo-edit-do" data-id="${id}" data-date="${date}">保存</button></div>`);
   }
@@ -964,9 +957,9 @@ $('#view').addEventListener('click', e => {
   }
 });
 
-/* 导航栏分段选择（类别 / 优先级） */
+/* 导航栏分段选择（类别） */
 $('#view').addEventListener('click', e => {
-  const seg = e.target.closest('#catSeg button, #prioSeg button');
+  const seg = e.target.closest('#catSeg button');
   if (seg) { $$('.seg').forEach(g => { if (g.contains(seg)) $$('button', g).forEach(b => b.classList.remove('on')); }); seg.classList.add('on'); }
 });
 /* 新鲜玩意筛选 */
@@ -1047,13 +1040,12 @@ $('#modalRoot').addEventListener('click', e => {
     const text = ($('#editText').value || '').trim();
     if (!text) { toast('内容不能为空'); return; }
     const cat = ($('#editCat .on') || {}).dataset?.cat || CATS[0];
-    const prio = ($('#editPrio .on') || {}).dataset?.prio || 'important';
     const ndate = ($('#editDate').value || odate).trim();
     const arr = state.work.todos[odate] || [];
     const idx = arr.findIndex(x => x.id === id);
     if (idx < 0) { toast('任务不存在'); return; }
     const item = arr[idx];
-    item.text = text; item.cat = cat; item.prio = prio;
+    item.text = text; item.cat = cat;
     if (ndate !== odate) { item.date = ndate; arr.splice(idx, 1); (state.work.todos[ndate] = state.work.todos[ndate] || []).push(item); }
     save(); closeModal(); viewWork($('#view')); toast('已保存');
   }
