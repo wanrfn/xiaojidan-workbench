@@ -290,6 +290,7 @@ function renderView() {
 /* =================== 工作 =================== */
 const CATS = ['稿件处理', '项目对接', '会议沟通', '人事招聘', '日常管理', '学习培训', '临时交办', '其他'];
 const SCOPES = ['组内', '科室', '部门', '外部'];
+let todoDraftDate = ''; // 添加框上次选的日期，便于连续把任务录到同一天
 const OLD_CAT_MAP = {
   '组内': { cat: '其他', scope: '组内' },
   '科室': { cat: '其他', scope: '科室' },
@@ -326,6 +327,7 @@ function workStats() {
   const weekStart = addDays(startOfDay(now), -dow);
   let wTotal = 0, wDone = 0, mTotal = 0, mDone = 0;
   Object.keys(state.work.todos).forEach(d => {
+    if (d > t) return; // 提前排的未来任务不计入已完成统计
     const dd = new Date(d);
     if (dd >= weekStart) { const arr = state.work.todos[d]; wTotal += arr.length; wDone += arr.filter(x => x.done).length; }
     if (dd.getFullYear() === now.getFullYear() && dd.getMonth() === now.getMonth()) {
@@ -338,7 +340,10 @@ function viewWork(v) {
   ensureToday();
   const t = todayStr();
   const today = state.work.todos[t] || [];
-  const dates = Object.keys(state.work.todos).filter(d => d !== t).sort().reverse();
+  const other = Object.keys(state.work.todos).filter(d => d !== t);
+  const future = other.filter(d => d > t).sort();
+  const past = other.filter(d => d < t).sort().reverse();
+  const defDate = todoDraftDate || t;
   const st = workStats();
   v.innerHTML = `
   <div class="card card-soft">
@@ -354,7 +359,9 @@ function viewWork(v) {
     <div class="card-head"><span class="ch-emoji">📝</span><h2>今日 To Do</h2>
       <span class="ch-sub">${t} ${WEEK[new Date().getDay()]}</span></div>
     <div class="todo-add">
-      <input class="field" id="todoInput" placeholder="写点今天要做的事…" />
+      <input class="field" id="todoInput" placeholder="写点要做的事…（可提前排到未来日期）" />
+      <span class="ch-sub">日期</span>
+      <input type="date" class="field" id="todoDate" value="${defDate}" style="width:150px" />
       <span class="ch-sub">性质</span>
       <div class="seg" id="catSeg">
         ${CATS.map((c, i) => `<button data-cat="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
@@ -371,8 +378,12 @@ function viewWork(v) {
     <div style="margin-top:14px"><button class="btn yellow sm" data-act="report-open">📊 生成半月/月/季/年报</button></div>
   </div>
 
-  ${dates.length ? `<div class="card card-soft"><div class="card-head"><span class="ch-emoji">🗂️</span><h2>历史记录</h2><span class="ch-sub">点击日期可折叠</span></div>
-    ${dates.map(d => historyDay(d)).join('')}
+  ${future.length ? `<div class="card card-soft"><div class="card-head"><span class="ch-emoji">🗓️</span><h2>未来安排</h2><span class="ch-sub">提前计划的待办，到期当天自动进入「今日 To Do」</span></div>
+    ${future.map(d => historyDay(d)).join('')}
+  </div>` : ''}
+
+  ${past.length ? `<div class="card card-soft"><div class="card-head"><span class="ch-emoji">🗂️</span><h2>历史记录</h2><span class="ch-sub">点击日期可折叠</span></div>
+    ${past.map(d => historyDay(d)).join('')}
   </div>` : ''}
   `;
 }
@@ -900,9 +911,11 @@ $('#view').addEventListener('click', e => {
     if (!text) { toast('先写点内容'); return; }
     const cat = ($('#catSeg .on') || {}).dataset?.cat || CATS[0];
     const sc = ($('#scopeSeg .on') || {}).dataset?.scope || SCOPES[0];
-    const t = todayStr();
-    state.work.todos[t].push({ id: uid(), text, cat, scope: sc, done: false, date: t });
+    const t = ($('#todoDate') && $('#todoDate').value) ? $('#todoDate').value.trim() : todayStr();
+    todoDraftDate = t;
+    (state.work.todos[t] = state.work.todos[t] || []).push({ id: uid(), text, cat, scope: sc, done: false, date: t });
     save(); input.value = ''; viewWork($('#view'));
+    if (t !== todayStr()) toast('已记到 ' + t);
   }
   else if (act === 'todo-toggle') {
     const { id, date } = el.dataset;
