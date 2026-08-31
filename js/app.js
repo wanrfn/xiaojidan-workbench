@@ -288,8 +288,33 @@ function renderView() {
 }
 
 /* =================== 工作 =================== */
-const CATS = ['组内', '科室', '部门', '面试', '项目对接', '日常管理', '特殊任务', '其他'];
+const CATS = ['稿件处理', '项目对接', '会议沟通', '人事招聘', '日常管理', '学习培训', '临时交办', '其他'];
+const SCOPES = ['组内', '科室', '部门', '外部'];
+const OLD_CAT_MAP = {
+  '组内': { cat: '其他', scope: '组内' },
+  '科室': { cat: '其他', scope: '科室' },
+  '部门': { cat: '其他', scope: '部门' },
+  '面试': { cat: '人事招聘', scope: '组内' },
+  '项目对接': { cat: '项目对接', scope: '组内' },
+  '日常管理': { cat: '日常管理', scope: '组内' },
+  '特殊任务': { cat: '临时交办', scope: '组内' },
+  '其他': { cat: '其他', scope: '组内' },
+};
+function migrateTodos() {
+  if (state.work.catSchema === 2) return;
+  Object.keys(state.work.todos || {}).forEach(d => {
+    (state.work.todos[d] || []).forEach(t => {
+      if (t.scope && CATS.indexOf(t.cat) >= 0) return;
+      const m = OLD_CAT_MAP[t.cat];
+      if (m) { t.cat = m.cat; t.scope = m.scope; }
+      else { t.scope = t.scope || SCOPES[0]; }
+    });
+  });
+  state.work.catSchema = 2;
+  save();
+}
 function ensureToday() {
+  migrateTodos();
   const t = todayStr();
   if (!state.work.todos[t]) { state.work.todos[t] = []; save(); }
 }
@@ -330,8 +355,13 @@ function viewWork(v) {
       <span class="ch-sub">${t} ${WEEK[new Date().getDay()]}</span></div>
     <div class="todo-add">
       <input class="field" id="todoInput" placeholder="写点今天要做的事…" />
+      <span class="ch-sub">性质</span>
       <div class="seg" id="catSeg">
         ${CATS.map((c, i) => `<button data-cat="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
+      </div>
+      <span class="ch-sub">范围</span>
+      <div class="seg" id="scopeSeg">
+        ${SCOPES.map((c, i) => `<button data-scope="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
       </div>
       <button class="btn primary" data-act="todo-add">＋ 添加</button>
     </div>
@@ -348,10 +378,11 @@ function viewWork(v) {
 }
 function todoRow(tk) {
   const catPill = `<span class="pill green">${esc(tk.cat || '其他')}</span>`;
+  const scopePill = `<span class="pill gray">${esc(tk.scope || '组内')}</span>`;
   return `<div class="todo-item ${tk.done ? 'done' : ''}" data-id="${tk.id}">
     <div class="todo-check" data-act="todo-toggle" data-id="${tk.id}" data-date="${tk.date}">${tk.done ? '✓' : ''}</div>
     <div class="todo-text">${esc(tk.text)}</div>
-    <div class="todo-meta">${catPill}</div>
+    <div class="todo-meta">${catPill}${scopePill}</div>
     <div class="todo-edit" data-act="todo-edit" data-id="${tk.id}" data-date="${tk.date}" title="修改">✏️</div>
     <div class="todo-del" data-act="todo-del" data-id="${tk.id}" data-date="${tk.date}">🗑</div>
   </div>`;
@@ -417,11 +448,11 @@ function openReport() {
   ['repS', 'repE'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
 function genReport(range, custom) {
-  let r, label, scope;
+  let r, label, hd;
   if (range === 'custom') {
     if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
     r = { s: custom.s, e: custom.e }; label = '工作汇报';
-    scope = { work: '本期工作', plan: '下阶段工作计划与目标' };
+    hd = { work: '本期工作', plan: '下阶段工作计划与目标' };
   } else {
     r = dateRange(range);
     const M = {
@@ -431,7 +462,7 @@ function genReport(range, custom) {
       quarter: { title: '工作季报', work: '本季工作', plan: '下季工作计划与目标' },
       year:    { title: '工作年报', work: '本年工作', plan: '明年工作计划与目标' },
     };
-    label = M[range].title; scope = { work: M[range].work, plan: M[range].plan };
+    label = M[range].title; hd = { work: M[range].work, plan: M[range].plan };
   }
   if (!r) { toast('区间无效'); return; }
   const all = [];
@@ -443,11 +474,13 @@ function genReport(range, custom) {
   const rate = all.length ? Math.round(done / all.length * 100) : 0;
   const open = all.filter(t => !t.done);
   const days = new Set(all.map(t => t.date)).size;
-  const catLabel = { '组内': '组内管理工作', '科室': '科室工作', '部门': '部门工作' };
   const catOrder = CATS;
   const byCat = {}; catOrder.forEach(c => byCat[c] = []);
-  all.forEach(t => { const c = t.cat || '未分类'; (byCat[c] = byCat[c] || []).push(t); });
+  all.forEach(t => { const c = t.cat || '其他'; (byCat[c] = byCat[c] || []).push(t); });
   const extraCats = Object.keys(byCat).filter(c => !catOrder.includes(c));
+  const scopeStats = {}; SCOPES.forEach(s => scopeStats[s] = 0);
+  all.forEach(t => { const s = t.scope || SCOPES[0]; scopeStats[s] = (scopeStats[s] || 0) + 1; });
+  const scopeLine = SCOPES.filter(s => scopeStats[s] > 0).map(s => `${s} ${scopeStats[s]}`).join(' · ');
 
   const L = [];
   L.push(`# ${label}`);
@@ -455,20 +488,23 @@ function genReport(range, custom) {
   L.push(`> 统计区间：**${r.s} 至 ${r.e}**　|　共 ${days} 天有记录`);
   L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
   L.push('');
-  if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
+  if (all.length) {
+    L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
+    if (scopeLine) L.push(`归属分布：${scopeLine}。`);
+  }
   else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
   L.push('');
-  // 4. 本周/本期工作（按你的模板，归纳到 组内/科室/部门）
-  L.push(`4.${scope.work}：`);
+  // 4. 本周/本期工作（按「工作性质」分组，每条标注归属范围）
+  L.push(`4.${hd.work}：`);
   catOrder.concat(extraCats).forEach(c => {
     const items = byCat[c]; if (!items || !items.length) return;
-    L.push(`○${catLabel[c] || c}：`);
-    items.forEach(t => L.push(`- ${t.text} · ${t.date}${t.done ? ' ✓' : '（未完成）'}`));
+    L.push(`○${c}：`);
+    items.forEach(t => L.push(`- ${t.text} · ${t.scope || SCOPES[0]} · ${t.date}${t.done ? ' ✓' : '（未完成）'}`));
   });
   L.push('');
   // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划）
-  L.push(`5.${scope.plan}：`);
-  if (open.length) open.forEach(t => L.push(`- ${t.text}（${t.cat || '未分类'} · 原定 ${t.date}）`));
+  L.push(`5.${hd.plan}：`);
+  if (open.length) open.forEach(t => L.push(`- ${t.text}（${t.cat || '其他'} · ${t.scope || SCOPES[0]} · 原定 ${t.date}）`));
   else L.push('- （本期任务已全部完成，可在此补充新目标）');
   const md = L.join('\n');
 
@@ -481,7 +517,7 @@ function genReport(range, custom) {
         <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
         <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。已按你的模板生成：4.本周/本期工作（组内 · 科室 · 部门）→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。按「工作性质」分小标题，每条标注「归属范围」→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
       <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:340px;overflow:auto">${esc(md)}</pre>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
@@ -863,8 +899,9 @@ $('#view').addEventListener('click', e => {
     const input = $('#todoInput'); const text = input.value.trim();
     if (!text) { toast('先写点内容'); return; }
     const cat = ($('#catSeg .on') || {}).dataset?.cat || CATS[0];
+    const sc = ($('#scopeSeg .on') || {}).dataset?.scope || SCOPES[0];
     const t = todayStr();
-    state.work.todos[t].push({ id: uid(), text, cat, done: false, date: t });
+    state.work.todos[t].push({ id: uid(), text, cat, scope: sc, done: false, date: t });
     save(); input.value = ''; viewWork($('#view'));
   }
   else if (act === 'todo-toggle') {
@@ -883,7 +920,8 @@ $('#view').addEventListener('click', e => {
     if (!item) { toast('任务不存在'); return; }
     openModal(`<h2>✏️ 修改任务</h2>
       <div class="row"><label>内容</label><textarea class="field" id="editText" rows="2" style="flex:1">${esc(item.text)}</textarea></div>
-      <div class="row"><label>分类</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
+      <div class="row"><label>工作性质</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
+      <div class="row"><label>归属范围</label><div class="seg" id="editScope">${SCOPES.map(c => `<button data-scope="${c}" class="${c === item.scope ? 'on' : ''}">${c}</button>`).join('')}</div></div>
       <div class="row"><label>日期</label><input type="date" class="field" id="editDate" value="${item.date}"></div>
       <div class="row"><button class="btn primary" data-act="todo-edit-do" data-id="${id}" data-date="${date}">保存</button></div>`);
   }
@@ -957,9 +995,9 @@ $('#view').addEventListener('click', e => {
   }
 });
 
-/* 导航栏分段选择（类别） */
+/* 导航栏分段选择（性质 / 范围） */
 $('#view').addEventListener('click', e => {
-  const seg = e.target.closest('#catSeg button');
+  const seg = e.target.closest('#catSeg button, #scopeSeg button');
   if (seg) { $$('.seg').forEach(g => { if (g.contains(seg)) $$('button', g).forEach(b => b.classList.remove('on')); }); seg.classList.add('on'); }
 });
 /* 新鲜玩意筛选 */
@@ -1040,12 +1078,13 @@ $('#modalRoot').addEventListener('click', e => {
     const text = ($('#editText').value || '').trim();
     if (!text) { toast('内容不能为空'); return; }
     const cat = ($('#editCat .on') || {}).dataset?.cat || CATS[0];
+    const sc = ($('#editScope .on') || {}).dataset?.scope || SCOPES[0];
     const ndate = ($('#editDate').value || odate).trim();
     const arr = state.work.todos[odate] || [];
     const idx = arr.findIndex(x => x.id === id);
     if (idx < 0) { toast('任务不存在'); return; }
     const item = arr[idx];
-    item.text = text; item.cat = cat;
+    item.text = text; item.cat = cat; item.scope = sc;
     if (ndate !== odate) { item.date = ndate; arr.splice(idx, 1); (state.work.todos[ndate] = state.work.todos[ndate] || []).push(item); }
     save(); closeModal(); viewWork($('#view')); toast('已保存');
   }
