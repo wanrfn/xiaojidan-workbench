@@ -309,6 +309,57 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .scrim{display:none; position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:25;}
 .scrim.show{display:block;}
 
+/* ============ 工作 To Do / 小组目标管理 子标签 ============ */
+.work-tabs,.team-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.work-tab,.team-tab{
+  padding:8px 18px;border-radius:12px;font-weight:700;font-size:13px;
+  background:var(--card-soft);color:var(--ink-soft);transition:.15s;cursor:pointer;
+  border:1.5px solid transparent;
+}
+.work-tab:hover,.team-tab:hover{background:var(--green-50);}
+.work-tab.on,.team-tab.on{background:linear-gradient(135deg,var(--green-300),var(--green-400));color:#fff;box-shadow:var(--shadow-sm);}
+
+/* ============ 小组目标管理 ============ */
+.team-group-card{background:var(--green-50);border-radius:16px;padding:16px;border:1px solid var(--line)}
+.team-g-name{font-size:16px;font-weight:800;color:var(--ink);margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.team-g-target-label{font-size:12px;font-weight:600;color:var(--ink-soft);background:#fff;padding:3px 10px;border-radius:99px}
+.team-target-input{text-align:center;font-weight:700}
+.team-subgroups{margin-left:20px;border-left:3px solid var(--green-200);padding-left:14px}
+.team-sg-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:6px 0}
+.team-sg-name{font-size:13.5px;font-weight:700;min-width:90px}
+.team-sg-target-label{font-size:11px;color:var(--ink-soft)}
+.team-sg-members{display:inline-flex;gap:4px;flex-wrap:wrap}
+
+/* 成员列表 */
+.team-member-list{display:flex;flex-direction:column;gap:8px}
+.team-member-row{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;background:var(--card-soft);border-radius:14px;border:1px solid var(--line);
+}
+.team-m-name{font-weight:800;min-width:60px;font-size:14px}
+.team-m-target{font-size:12px;display:flex;align-items:center;gap:4px}
+.team-m-group{display:flex;align-items:center;gap:4px;font-size:12px}
+.team-sg-select{width:110px!important}
+
+/* 周数据表格 */
+.team-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.team-table th{background:var(--green-50);padding:7px 5px;text-align:left;font-weight:700;white-space:nowrap;border-bottom:2px solid var(--line-strong)}
+.team-table td{padding:6px 4px;border-bottom:1px dashed var(--line);vertical-align:middle}
+.team-table tr:hover td{background:var(--green-50)}
+.team-cell{width:100%!important;padding:3px 4px!important;font-size:12.5px!important;height:28px!important}
+.team-score-cell{text-align:center;font-weight:800;font-size:14px}
+.score-pos{color:#2E7D32}
+.score-neg{color:#C62828}
+
+/* 积分看板 - 领奖台 */
+.podium{display:flex;flex-direction:column;gap:6px}
+.podium-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;background:var(--card-soft);transition:.15s}
+.podium-item:hover{background:var(--green-50)}
+.podium-top3{background:linear-gradient(135deg,#FFF8E1,#FFECB3);border:1.5px solid #FFD54F}
+.podium-rank{font-size:18px;width:32px;text-align:center;flex-shrink:0}
+.podium-name{font-weight:700;flex:1}
+.podium-score{font-weight:800;font-size:16px;min-width:50px;text-align:right}
+
 /* ============ 响应式 ============ */
 @media (max-width:860px){
   .sidebar{position:fixed; left:0; top:0; transform:translateX(-105%); transition:.25s; box-shadow:0 0 40px rgba(0,0,0,.18);}
