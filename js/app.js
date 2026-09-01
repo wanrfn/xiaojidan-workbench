@@ -210,6 +210,21 @@ function seed() {
     recipes: { favs: [], dailySeed: {} },
     fresh: { items: SAMPLE_FRESH.slice(), favs: [] },
     custom: {},
+    team: {
+      activeTab: 'goals',
+      groups: [
+        { id: 'g1', name: '>2年组', target: '', subGroups: [
+          { id: 'sg1', name: 'A组(2人)', target: '', memberIds: [] },
+          { id: 'sg2', name: 'B组(3人)', target: '', memberIds: [] }
+        ]},
+        { id: 'g2', name: '1-2年组', target: '', subGroups: [
+          { id: 'sg3', name: 'C组(3人)', target: '', memberIds: [] },
+          { id: 'sg4', name: 'D组(3人)', target: '', memberIds: [] }
+        ]}
+      ],
+      members: [],
+      weeks: {}
+    },
     settings: { sync: { mode: 'local', url: '', enabled: false, cloudId: '', cloudUrl: '', cloudKey: '' } },
   };
 }
@@ -226,6 +241,7 @@ function load() {
       finance: Object.assign(base.finance, s.finance),
       recipes: Object.assign(base.recipes, s.recipes),
       fresh: Object.assign(base.fresh, s.fresh),
+      team: Object.assign(base.team, s.team || {}),
       settings: Object.assign(base.settings, s.settings || {}, {
         sync: Object.assign(base.settings.sync, (s.settings && s.settings.sync) || {}),
       }),
@@ -337,6 +353,18 @@ function workStats() {
   return { todayTotal: today.length, todayDone: today.filter(x => x.done).length, wTotal, wDone, mTotal, mDone };
 }
 function viewWork(v) {
+  const workTab = state.work._tab || 'todo';
+  v.innerHTML = `
+  <div class="work-tabs" style="margin-bottom:16px">
+    <button class="work-tab ${workTab==='todo'?'on':''}" data-act="work-tab" data-tab="todo">📝 To Do</button>
+    <button class="work-tab ${workTab==='team'?'on':''}" data-act="work-tab" data-tab="team">👥 小组目标管理</button>
+  </div>
+  <div id="workPanel"></div>`;
+  const panel = $('#workPanel');
+  if (workTab === 'todo') renderWorkTodo(panel);
+  else viewTeamGoals(panel);
+}
+function renderWorkTodo(v) {
   ensureToday();
   const t = todayStr();
   const today = state.work.todos[t] || [];
@@ -398,6 +426,360 @@ function todoRow(tk) {
     <div class="todo-del" data-act="todo-del" data-id="${tk.id}" data-date="${tk.date}">🗑</div>
   </div>`;
 }
+
+/* =================== 小组目标管理 =================== */
+function viewTeamGoals(v) {
+  const tab = state.team.activeTab || 'goals';
+  v.innerHTML = `
+  <div class="team-tabs" style="margin-bottom:16px">
+    <button class="team-tab ${tab==='goals'?'on':''}" data-act="team-tab" data-ttab="goals">🎯 目标设置</button>
+    <button class="team-tab ${tab==='members'?'on':''}" data-act="team-tab" data-ttab="members">👥 成员管理</button>
+    <button class="team-tab ${tab==='weekly'?'on':''}" data-act="team-tab" data-ttab="weekly">📝 周数据录入</button>
+    <button class="team-tab ${tab==='scoreboard'?'on':''}" data-act="team-tab" data-ttab="scoreboard">🏆 积分看板</button>
+  </div>
+  <div id="teamPanel"></div>`;
+  const p = $('#teamPanel');
+  if (tab === 'goals') renderTeamGoals(p);
+  else if (tab === 'members') renderTeamMembers(p);
+  else if (tab === 'weekly') renderTeamWeekly(p);
+  else renderTeamScoreboard(p);
+}
+
+/* ---- 目标设置 ---- */
+function renderTeamGoals(v) {
+  const T = state.team;
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>🎯 小组目标设置</h2><span class="ch-sub">填写各层级目标完成率（%）</span></div>
+  ${T.groups.map(g => `
+    <div class="team-group-card" style="margin-bottom:20px">
+      <div class="team-g-name">${esc(g.name)} <span class="team-g-target-label">大组目标</span>
+        <input type="number" class="field team-target-input" data-gid="${g.id}" data-level="group" value="${g.target||''}" placeholder="%" style="width:80px"> %
+      </div>
+      <div class="team-subgroups">
+        ${g.subGroups.map(sg => `
+          <div class="team-sg-row">
+            <span class="team-sg-name">${esc(sg.name)}</span>
+            <span class="team-sg-target-label">小小组目标</span>
+            <input type="number" class="field team-target-input" data-gid="${g.id}" data-sgid="${sg.id}" data-level="subgroup" value="${sg.target||''}" placeholder="%" style="width:80px"> %
+            <span class="team-sg-members">
+              ${(T.members.filter(m => sg.memberIds.includes(m.id))).map(m => `<span class="pill cat-其他">${esc(m.name)}<button data-act="team-rm-member-sg" data-mid="${m.id}" data-sgid="${sg.id}" title="移出此小组" style="border:none;background:none;font-size:11px;margin-left:2px;cursor:pointer">✕</button>`).join('')}
+              ${sg.memberIds.length === 0 ? '<span style="color:var(--ink-faint);font-size:12px">暂无成员，请在「成员管理」中分配</span>' : ''}
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('')}
+  <div style="margin-top:12px"><button class="btn primary" data-act="team-save-goals">💾 保存目标</button></div>
+  </div>`;
+}
+
+/* ---- 成员管理 ---- */
+function renderTeamMembers(v) {
+  const T = state.team;
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">共11人：>2年组5人 / 1-2年组6人</span></div>
+  <div style="margin-bottom:12px"><button class="btn primary sm" data-act="team-add-member">＋ 添加成员</button></div>
+  <div class="team-member-list">
+    ${T.members.length === 0 ? '<div class="empty">暂无成员，点击上方按钮添加</div>' :
+      T.members.map(m => {
+        const g = T.groups.find(gr => gr.id === m.groupId);
+        const sg = g ? g.subGroups.find(s => s.id === m.subGroupId) : null;
+        return `<div class="team-member-row">
+          <span class="team-m-name">${esc(m.name)}</span>
+          <span class="team-m-target">个人目标: <input type="number" class="field" data-mid="${m.id}" data-fld="personalTarget" value="${m.personalTarget||''}" placeholder="%" style="width:70px"> %</span>
+          <span class="team-m-group">
+            所属: <select class="field" data-mid="${m.id}" data-fld="groupId" style="width:110px">
+              ${T.groups.map(gg => `<option value="${gg.id}" ${gg.id===m.groupId?'selected':''}>${esc(gg.name)}</option>`).join('')}
+            </select>
+            <select class="field team-sg-select" data-mid="${m.id}" data-fld="subGroupId" style="width:110px">
+              ${((g||T.groups[0]).subGroups||[]).map(ss => `<option value="${ss.id}" ${ss.id===m.subGroupId?'selected':''}>${esc(ss.name)}</option>`).join('')}
+            </select>
+          </span>
+          <button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger)">删除</button>
+        </div>`;
+      }).join('')
+    }
+  </div>
+  <div style="margin-top:12px"><button class="btn primary" data-act="team-save-members">💾 保存成员</button></div>
+  </div>`;
+}
+
+/* ---- 周数据录入 ---- */
+function getWeekKey(dateStr) { const d = new Date(dateStr); const jan1 = new Date(d.getFullYear(),0,1); const days = Math.floor((d - jan1)/(86400000)); const w = Math.ceil((days + jan1.getDay()+1)/7); return `${d.getFullYear()}-W${String(w).padStart(2,'0')}`; }
+function getWeeksInMonth(year, month) { const weeks = []; Object.keys(state.team.weeks || {}).forEach(k => { const m = k.match(/^(\d{4})-W(\d{2})$/); if (!m) return; const d = new Date(year, month, 1); const jan1 = new Date(year,0,1); const targetWeek = Math.ceil((1 + jan1.getDay())/7); const wNum = parseInt(m[2]); /* simple: include if year matches and week is in range */ if (parseInt(m[1]) === year) weeks.push(k); }); return weeks.sort().reverse(); }
+
+function renderTeamWeekly(v) {
+  const T = state.team;
+  const now = new Date();
+  const curWeek = getWeekKey(todayStr());
+  const weekKeys = Object.keys(T.weeks || {}).sort().reverse();
+  const selectedWeek = T._selectedWeek || curWeek;
+
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>📝 周数据录入</h2>
+    <span class="ch-sub">
+      选择周: <select class="field" id="weekSelect" style="width:160px">
+        <option value="">+ 新建一周</option>
+        ${weekKeys.map(wk => `<option value="${wk}" ${wk===selectedWeek?'selected':''}>${wk}${wk===curWeek?' (本周)':''}</option>`).join('')}
+      </select>
+      ${selectedWeek && !T.weeks[selectedWeek] ? '' : selectedWeek ? `<span style="margin-left:8px;font-size:12px;color:var(--ink-soft)">日期: ${(T.weeks[selectedWeek]||{}).weekDate||''}</span>` : ''}
+    </span>
+  </div>
+  <div id="weeklyForm"></div>
+  </div>`;
+
+  renderWeeklyForm(selectedWeek);
+}
+function renderWeeklyForm(weekKey) {
+  const T = state.team;
+  const form = $('#weeklyForm');
+  if (!weekKey || !T.weeks[weekKey]) {
+    form.innerHTML = `<div style="padding:20px;text-align:center">
+      <p style="color:var(--ink-soft);margin-bottom:12px">选择已有周或新建一周来录入数据</p>
+      <div class="row"><label>该周起始日期</label><input type="date" class="field" id="newWeekDate" value="${todayStr()}"></div>
+      <div class="row"><button class="btn primary" data-act="team-create-week">创建新周</button></div>
+    </div>`;
+    return;
+  }
+  const wk = T.weeks[weekKey];
+  const members = T.members;
+
+  if (members.length === 0) { form.innerHTML = '<div class="empty">请先在「成员管理」中添加成员</div>'; return; }
+
+  form.innerHTML = `
+  <div style="overflow-x:auto">
+  <table class="team-table">
+    <thead><tr>
+      <th>成员</th><th>所属小组</th><th>完成率%</th><th>严错数</th><th>无差错周</th>
+      <th>个人达标</th><th>小小组达标</th><th>应出勤排名</th>
+      <th>pending/误稿</th><th>Low违规</th><th>Med违规</th><th>High违规</th>
+      <th>活动(×3)</th><th>主动补位(×2)</th><th>线上分享(×1)</th>
+      <th>大事件(×2)</th><th>茶水(×1)</th><th>答题(×1)</th><th>讲师(×3)</th><th>其他推动</th>
+      <th>触及质量条例</th><th>拖累小组</th><th>严错≥3</th><th>全员不达标</th>
+      <th>周积分</th>
+    </tr></thead>
+    <tbody>
+      ${members.map(m => {
+        const d = (wk.data || {})[m.id] || {};
+        const score = calcMemberWeekScore(m, d, wk, weekKey);
+        const g = T.groups.find(gr => gr.id === m.groupId);
+        const sg = g ? g.subGroups.find(s => s.id === m.subGroupId) : null;
+        return `<tr>
+          <td><b>${esc(m.name)}</b></td>
+          <td><span class="pill scope-${sg?((['组内','科室','部门','外部'])[T.groups.indexOf(g)]||'其他'):'其他'}" style="font-size:11px">${sg?sg.name:'-'}</span></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="completionRate" value="${d.completionRate!==undefined?d.completionRate:''}" style="width:60px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="seriousErrors" value="${d.seriousErrors||0}" style="width:50px"></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusNoErrorWeek" ${d.bonusNoErrorWeek?'checked':''}></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusPersonalGoal" ${d.bonusPersonalGoal?'checked':''}></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusSubGroupGoal" ${d.bonusSubGroupGoal?'checked':''}></td>
+          <td><select class="field team-cell" data-mid="${m.id}" data-fld="attendanceRank" style="width:65px">
+            <option value="" ${!d.attendanceRank?'selected':''}>-</option>
+            ${[1,2,3].map(n=>`<option value="${n}" ${d.attendanceRank==n?'selected':''}>Top${n}</option>`).join('')}
+            <option value="0" ${d.attendanceRank===0?'selected':''}>其他</option>
+          </select></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="pendingCount" value="${d.pendingCount||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="lowViolations" value="${d.lowViolations||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="medViolations" value="${d.medViolations||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="highViolations" value="${d.highViolations||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusActivity" value="${d.bonusActivity||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusInitiative" value="${d.bonusInitiative||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusOnlineShare" value="${d.bonusOnlineShare||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusEventOwner" value="${d.bonusEventOwner||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusTea" value="${d.bonusTea||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusQuiz" value="${d.bonusQuiz||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusTrainer" value="${d.bonusTrainer||0}" style="width:50px"></td>
+          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusOtherPush" value="${d.bonusOtherPush||0}" style="width:55px" placeholder="1~3每项"></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductQualityRule" ${d.deductQualityRule?'checked':''}></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductDragGroup" ${d.deductDragGroup?'checked':''}></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductErrorsGte3" ${d.deductErrorsGte3?'checked':''}></td>
+          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductGroupAllFail" ${d.deductGroupAllFail?'checked':''}></td>
+          <td class="team-score-cell ${score>=0?'score-pos':'score-neg'}"><b>${score}</b></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  </div>
+  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn primary" data-act="team-save-week" data-week="${weekKey}">💾 保存本周数据</button>
+    <button class="btn yellow sm" data-act="team-show-rules" data-week="${weekKey}>📋 查看积分规则</button>
+  </div>`;
+}
+
+/* ---- 积分核算引擎 ---- */
+function calcMemberWeekScore(member, d, wk, weekKey) {
+  let score = 0;
+  // 每周加分
+  if (d.bonusNoErrorWeek) score += 1;           // 个人本周无差错
+  if (d.bonusPersonalGoal) score += 1;          // 个人完成率目标
+  if (d.bonusSubGroupGoal) score += 1;         // 小小组完成率达标
+  // 每月加分（按周录入，月度汇总时统计）
+  // 应出勤排名
+  if (d.attendanceRank === 1) score += 3;
+  else if (d.attendanceRank === 2) score += 2;
+  else if (d.attendanceRank === 3) score += 1;
+  // 无严错
+  const errCount = parseInt(d.seriousErrors) || 0;
+  if (errCount === 0) score += 2;
+  // 其他加分
+  score += (parseInt(d.bonusActivity)||0) * 3;       // 组织活动 ×3
+  score += (parseInt(d.bonusInitiative)||0) * 2;     // 主动补位 ×2
+  score += (parseInt(d.bonusOnlineShare)||0) * 1;     // 线上分享 ×1
+  score += (parseInt(d.bonusEventOwner)||0) * 2;      // 大事件负责人 ×2
+  score += (parseInt(d.bonusTea)||0) * 1;             // 茶水 ×1
+  score += (parseInt(d.bonusQuiz)||0) * 1;            // 答题 ×1
+  score += (parseInt(d.bonusTrainer)||0) * 3;         // 讲师 ×3
+  score += (parseInt(d.bonusOtherPush)||0);           // 其他推动
+
+  // 扣分：每人每周
+  score -= errCount * 0.5;                            // 每个严错 -0.5
+  score -= (parseInt(d.pendingCount)||0) * 0.5;       // pending/误稿 -0.5 each
+  // 扣分：每月
+  if (d.deductErrorsGte3) score -= 2;                // 严错≥3个
+  if (d.deductQualityRule) score -= 1;               // 触及质量条例
+  if (d.deductDragGroup) score -= 2;                 // 拖累小组
+  score -= (parseInt(d.lowViolations)||0) * 1;       // Low违规
+  score -= (parseInt(d.medViolations)||0) * 1;       // Medium违规
+  score -= (parseInt(d.highViolations)||0) * 3;      // High违规
+  if (d.deductGroupAllFail) score -= 2;              // 全员不达标
+
+  return Math.round(score * 10) / 10;
+}
+
+function calcMonthTotal(memberId, upToWeek) {
+  let total = 0;
+  const weeks = Object.keys(state.team.weeks || {}).sort();
+  for (const wk of weeks) {
+    if (upToWeek && wk > upToWeek) break;
+    const wd = state.team.weeks[wk];
+    if (!wd || !wd.data || !wd.data[memberId]) continue;
+    total += calcMemberWeekScore(
+      state.team.members.find(m => m.id === memberId) || {},
+      wd.data[memberId], wd, wk
+    );
+  }
+  return Math.round(total * 10) / 10;
+}
+
+/* ---- 积分看板 ---- */
+function renderTeamScoreboard(v) {
+  const T = state.team;
+  const weekKeys = Object.keys(T.weeks || {}).sort().reverse();
+  const selMonth = T._sbMonth || (new Date().getMonth() + 1);
+
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>🏆 积分看板</h2>
+    <span class="ch-sub">
+      月份: <select class="field" id="sbMonthSelect" style="width:100px">
+        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m==selMonth?'selected':''}>${m}月</option>`).join('')}
+      </select>
+    </span>
+  </div>
+  <div id="sbContent"></div></div>`;
+  renderSBContent(selMonth);
+}
+function renderSBContent(month) {
+  const T = state.team;
+  const c = $('#sbContent');
+  const year = new Date().getFullYear();
+  const monthWeeks = Object.keys(T.weeks || {}).filter(k => {
+    const m = k.match(/^(\d{4})-W(\d{2})$/);
+    if (!m) return false;
+    // 简单判断：根据 weekDate 判断月份
+    const wd = T.weeks[k];
+    if (!wd || !wd.weekDate) return false;
+    const d = new Date(wd.weekDate);
+    return d.getFullYear() === year && (d.getMonth() + 1) === month;
+  }).sort();
+
+  if (monthWeeks.length === 0) { c.innerHTML = '<div class="empty">该月暂无周数据，请先在「周数据录入」中添加</div>'; return; }
+
+  // 月度累计排行
+  const monthlyTotals = T.members.map(m => ({
+    id: m.id, name: m.name,
+    total: calcMonthTotal(m.id, monthWeeks[monthWeeks.length - 1])
+  })).sort((a, b) => b.total - a.total);
+
+  let html = `<div class="card card-soft" style="margin-bottom:16px">
+    <h3 style="margin:0 0 10px;font-size:15px">🥇 ${month}月累计积分 Top 排行 <span style="font-weight:400;color:var(--ink-faint);font-size:12px">（截至最新一周）</span></h3>
+    <div class="podium">`;
+  monthlyTotals.forEach((m, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
+    const isTop3 = i < 3;
+    html += `<div class="podium-item ${isTop3 ? 'podium-top3' : ''}">
+      <span class="podium-rank">${medal}</span>
+      <span class="podium-name">${esc(m.name)}</span>
+      <span class="podium-score ${m.total >= 0 ? 'score-pos' : 'score-neg'}">${m.total}</span>
+    </div>`;
+  });
+  html += `</div>
+    ${monthlyTotals.length > 0 && monthlyTotals[0].total > 0 ? '<p style="margin:8px 0 0;font-size:12px;color:var(--ink-faint)">🎁 每月积分 Top 3 有价值不等的额外惊喜哦～</p>' : ''}
+  </div>`;
+
+  // 各周明细
+  html += `<h3 style="margin:16px 0 10px;font-size:15px">📊 各周积分明细</h3>
+    <div class="card card-soft"><div style="overflow-x:auto">
+    <table class="team-table">
+      <thead><tr><th>成员</th>${monthWeeks.map(wk => `<th>${wk}<br><small>${(T.weeks[wk]||{}).weekDate||''}</small></th>`).join('')}<th>月合计</th></tr></thead>
+      <tbody>`;
+  T.members.forEach(m => {
+    html += `<tr><td><b>${esc(m.name)}</b></td>`;
+    let mTotal = 0;
+    monthWeeks.forEach(wk => {
+      const wd = T.weeks[wk];
+      const d = (wd && wd.data) ? wd.data[m.id] : null;
+      const s = d ? calcMemberWeekScore(m, d, wd, wk) : '-';
+      if (typeof s === 'number') mTotal += s;
+      const cls = typeof s === 'number' ? (s >= 0 ? 'score-pos' : 'score-neg') : '';
+      html += `<td class="${cls}" style="text-align:center">${s}</td>`;
+    });
+    html += `<td class="${mTotal >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center;font-weight:800">${Math.round(mTotal*10)/10}</td></tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+
+  c.innerHTML = html;
+}
+
+/* ---- 积分规则弹窗 ---- */
+function showTeamRules() {
+  openModal(`<h2>📋 积分规则一览</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;line-height:1.8">
+      <div><h4 style="color:var(--green-500);margin:0 0 6px">✅ 加分</h4>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td colspan="3" style="background:var(--green-50);font-weight:700;padding:4px 8px">每周</td></tr>
+          <tr><td>个人完成率目标</td><td>+1</td></tr>
+          <tr><td>小小组完成率达标</td><td>+1</td></tr>
+          <tr><td>个人本周无差错</td><td>+1</td></tr>
+          <tr><td colspan="3" style="background:var(--green-50);font-weight:700;padding:4px 8px;margin-top:6px">每月</td></tr>
+          <tr><td>应出勤组内 Top 1</td><td>+3</td></tr>
+          <tr><td>应出勤组内 Top 2</td><td>+2</td></tr>
+          <tr><td>应出勤组内 Top 3</td><td>+1</td></tr>
+          <tr><td>无严错</td><td>+2</td></tr>
+          <tr><td>组织技能分享/座谈会等线下活动</td><td>+3/次</td></tr>
+          <tr><td>主动接收临时紧急任务/补位/提建议</td><td>+2/次</td></tr>
+          <tr><td>线上 case 分享/tips/疑难攻坚</td><td>+1/次</td></tr>
+          <tr><td>周内大事件负责人</td><td>+2/次</td></tr>
+          <tr><td>组织下茶水</td><td>+1/次</td></tr>
+          <tr><td>小组答题</td><td>+1/次</td></tr>
+          <tr><td>科室培训讲师</td><td>+3/次</td></tr>
+          <tr><td>科室其他推动</td><td>+1~3</td></tr>
+        </table>
+      </div>
+      <div><h4 style="color:#C62828;margin:0 0 6px">❌ 扣分</h4>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td colspan="2" style="background:#FFEBEE;font-weight:700;padding:4px 8px">每人/每周</td></tr>
+          <tr><td>每产生 1 个严错</td><td>-0.5</td></tr>
+          <tr><td>pending / 误稿 / 漏 QC</td><td>-0.5/次</td></tr>
+          <tr><td colspan="2" style="background:#FFEBEE;font-weight:700;padding:4px 8px;margin-top:6px">每月</td></tr>
+          <tr><td>严错 ≥ 3 个</td><td>-2</td></tr>
+          <tr><td>触及当月质量目标具体条例</td><td>-1</td></tr>
+          <tr><td>完成率低导致小组不达标</td><td>-2</td></tr>
+          <tr><td>Low 等级违规（未送美修/delay）</td><td>-1/次</td></tr>
+          <tr><td>Medium 等级违规</td><td>-1/次</td></tr>
+          <tr><td>High 等级违规</td><td>-3/次</td></tr>
+          <tr><td>小小组成员完成率均不达标</td><td>-2</td></tr>
+        </table>
+        <p style="margin-top:10px;color:var(--ink-faint);font-size:12px">⚠️ 积分规则：每周一同步上周积分情况，每月统计一次总积分<br>每月积分 Top 3 有价值不等的额外惊喜哦～</p>
+      </div>
+    </div>`);
+}
+
 function historyDay(d) {
   const list = state.work.todos[d] || [];
   const done = list.filter(x => x.done).length;
@@ -906,7 +1288,8 @@ $('#addSectionBtn').addEventListener('click', () => {
 $('#view').addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act;
-  if (act === 'todo-add') {
+  if (act === 'work-tab') { state.work._tab = el.dataset.tab; save(); viewWork($('#view')); }
+  else if (act === 'todo-add') {
     const input = $('#todoInput'); const text = input.value.trim();
     if (!text) { toast('先写点内容'); return; }
     const cat = ($('#catSeg .on') || {}).dataset?.cat || CATS[0];
@@ -941,6 +1324,107 @@ $('#view').addEventListener('click', e => {
   else if (act === 'day-toggle') {
     const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
   }
+  /* ---- 小组目标管理事件 ---- */
+  else if (act === 'team-tab') { state.team.activeTab = el.dataset.ttab; save(); viewTeamGoals($('#teamPanel')); }
+  else if (act === 'team-save-goals') {
+    $$('.team-target-input').forEach(input => {
+      const gid = input.dataset.gid, sgid = input.dataset.sgid, level = input.level;
+      const val = input.value.trim();
+      if (level === 'group') { const g = state.team.groups.find(x => x.id === gid); if (g) g.target = val; }
+      else if (level === 'subgroup') {
+        const g = state.team.groups.find(x => x.id === gid);
+        if (g) { const sg = g.subGroups.find(x => x.id === sgid); if (sg) sg.target = val; }
+      }
+    });
+    save(); toast('目标已保存 ✅');
+  }
+  else if (act === 'team-add-member') {
+    openModal(`<h2>＋ 添加成员</h2>
+      <div class="row"><label>姓名</label><input class="field" id="newMName" placeholder="成员姓名" style="flex:1"></div>
+      <div class="row"><label>个人目标%</label><input type="number" class="field" id="newMTarget" placeholder="如 95" style="flex:1"></div>
+      <div class="row"><label>所属大组</label><select class="field" id="newMGroup" style="flex:1">
+        ${state.team.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
+      </select></div>
+      <div class="row"><label>所属小小组</label><select class="field" id="newMSGroup" style="flex:1">
+        ${(state.team.groups[0].subGroups||[]).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
+      </select></div>
+      <div class="row"><button class="btn primary" data-act="team-add-member-do">添加</button></div>`);
+  }
+  else if (act === 'team-add-member-do') {
+    const name = $('#newMName').value.trim();
+    if (!name) { toast('请输入姓名'); return; }
+    const mid = uid();
+    state.team.members.push({ id: mid, name, personalTarget: $('#newMTarget').value.trim(), groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
+    // 加入小小组
+    const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
+    if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
+    save(); closeModal(); viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
+  }
+  else if (act === 'team-del-member') {
+    const mid = el.dataset.mid;
+    if (!confirm('确定删除该成员？')) return;
+    state.team.members = state.team.members.filter(m => m.id !== mid);
+    state.team.groups.forEach(g => g.subGroups.forEach(sg => sg.memberIds = sg.memberIds.filter(id => id !== mid)));
+    save(); viewTeamGoals($('#teamPanel')); toast('已删除');
+  }
+  else if (act === 'team-rm-member-sg') {
+    const mid = el.dataset.mid, sgid = el.dataset.sgid;
+    state.team.groups.forEach(g => g.subGroups.forEach(sg => { if (sg.id === sgid) sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
+    save(); viewTeamGoals($('#teamPanel'));
+  }
+  else if (act === 'team-save-members') {
+    $$('[data-mid][data-fld]').forEach(input => {
+      const mid = input.dataset.mid, fld = input.fld;
+      const m = state.team.members.find(x => x.id === mid);
+      if (!m) return;
+      if (fld === 'groupId') {
+        // 从旧小组移除，加入新小组
+        const oldGid = m.groupId;
+        const newGid = input.value;
+        if (oldGid !== newGid) {
+          const oldG = state.team.groups.find(g => g.id === oldGid);
+          if (oldG) oldG.subGroups.forEach(sg => sg.memberIds = sg.memberIds.filter(id => id !== mid));
+          m.groupId = newGid;
+          m.subGroupId = '';
+        }
+      } else if (fld === 'subGroupId') {
+        const oldSgid = m.subGroupId, newSgid = input.value;
+        if (oldSgid !== newSgid) {
+          state.team.groups.forEach(g => g.subGroups.forEach(sg => { if (sg.id === oldSgid) sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
+          m.subGroupId = newSgid;
+          const g = state.team.groups.find(gr => gr.id === m.groupId);
+          if (g) { const sg = g.subGroups.find(s => s.id === newSgid); if (sg && !sg.memberIds.includes(mid)) sg.memberIds.push(mid); }
+        }
+      } else { m[fld] = input.value.trim(); }
+    });
+    save(); toast('成员信息已保存 ✅');
+  }
+  else if (act === 'team-create-week') {
+    const dateStr = $('#newWeekDate').value || todayStr();
+    const wk = getWeekKey(dateStr);
+    if (state.team.weeks[wk]) { toast('该周已存在'); return; }
+    state.team.weeks[wk] = { weekDate: dateStr, data: {} };
+    state.team._selectedWeek = wk; save();
+    renderTeamWeekly($('#teamPanel')); toast(`已创建 ${wk}`);
+  }
+  else if (act === 'team-save-week') {
+    const wk = el.dataset.week;
+    if (!state.team.weeks[wk]) { toast('周数据不存在'); return; }
+    state.team.weeks[wk].data = state.team.weeks[wk].data || {};
+    $$('.team-cell').forEach(input => {
+      const mid = input.dataset.mid, fld = input.fld;
+      if (!mid || !fld) return;
+      if (!state.team.weeks[wk].data[mid]) state.team.weeks[wk].data[mid] = {};
+      let val;
+      if (input.type === 'checkbox') val = input.checked;
+      else if (input.type === 'number' || input.tagName === 'SELECT') val = input.value === '' ? '' : parseFloat(input.value);
+      else val = input.value;
+      state.team.weeks[wk].data[mid][fld] = val;
+    });
+    save(); toast(`${wk} 数据已保存 ✅`);
+    renderWeeklyForm(wk); // 刷新显示积分
+  }
+  else if (act === 'team-show-rules') { showTeamRules(); }
   else if (act === 'report-open') openReport();
   else if (['report-gen', 'report-gen-custom', 'report-copy', 'report-export', 'report-export-docx'].includes(act)) handleReport(act, el);
   else if (act === 'quiz-open') { openQuiz(); }
@@ -1017,6 +1501,24 @@ $('#view').addEventListener('click', e => {
 $('#view').addEventListener('click', e => {
   const chip = e.target.closest('#freshFilter .chip');
   if (chip) { freshFilter = chip.dataset.cat; viewFresh($('#view')); }
+});
+/* 小组管理：周选择 / 月选择 change */
+$('#view').addEventListener('change', e => {
+  if (e.target.id === 'weekSelect') {
+    state.team._selectedWeek = e.target.value || ''; save();
+    renderWeeklyForm(e.target.value);
+  }
+  if (e.target.id === 'sbMonthSelect') {
+    state.team._sbMonth = parseInt(e.target.value); save();
+    renderSBContent(state.team._sbMonth);
+  }
+  // 成员管理：切换大组时联动小小组
+  if (e.target.classList.contains('team-sg-select')) {
+    const mid = e.target.dataset.mid;
+    const newGid = e.target.closest('.team-m-group').querySelector('[data-fld="groupId"]').value;
+    const g = state.team.groups.find(gr => gr.id === newGid);
+    if (g) { e.target.innerHTML = g.subGroups.map(sg => `<option value="${sg.id}" ${sg.id===e.target.value?'selected':''}>${esc(sg.name)}</option>`).join(''); }
+  }
 });
 
 /* =================== 弹窗事件委托 =================== */
