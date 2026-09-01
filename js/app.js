@@ -388,8 +388,8 @@ function viewWork(v) {
   `;
 }
 function todoRow(tk) {
-  const catPill = `<span class="pill green">${esc(tk.cat || '其他')}</span>`;
-  const scopePill = `<span class="pill gray">${esc(tk.scope || '组内')}</span>`;
+  const catPill = `<span class="pill cat-${esc(tk.cat || '其他')}">${esc(tk.cat || '其他')}</span>`;
+  const scopePill = `<span class="pill scope-${esc(tk.scope || '组内')}">${esc(tk.scope || '组内')}</span>`;
   return `<div class="todo-item ${tk.done ? 'done' : ''}" data-id="${tk.id}">
     <div class="todo-check" data-act="todo-toggle" data-id="${tk.id}" data-date="${tk.date}">${tk.done ? '✓' : ''}</div>
     <div class="todo-text">${esc(tk.text)}</div>
