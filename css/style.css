@@ -105,6 +105,20 @@ input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink);}
 .pill.imp{background:#FFE0E0; color:#d4604f;}
 .pill.daily{background:#E0EEFF; color:#4f86c4;}
 
+/* 任务行药丸：与 seg 按钮同色 */
+.pill.cat-稿件处理{background:#E8F5E9; color:#2E7D32;}
+.pill.cat-项目对接{background:#E3F2FD; color:#1565C0;}
+.pill.cat-会议沟通{background:#F3E5F5; color:#6A1B9A;}
+.pill.cat-人事招聘{background:#FCE4EC; color:#AD1457;}
+.pill.cat-日常管理{background:#FFF3E0; color:#E65100;}
+.pill.cat-学习培训{background:#E0F7FA; color:#00695C;}
+.pill.cat-临时交办{background:#FFEBEE; color:#C62828;}
+.pill.cat-其他{background:#ECEFF1; color:#455A64;}
+.pill.scope-组内{background:#E8F5E9; color:#2E7D32;}
+.pill.scope-科室{background:#E3F2FD; color:#1565C0;}
+.pill.scope-部门{background:#F3E5F5; color:#6A1B9A;}
+.pill.scope-外部{background:#FFF3E0; color:#E65100;}
+
 /* 按钮 */
 .btn{padding:9px 16px; border-radius:13px; font-weight:700; font-size:14px; transition:.15s; box-shadow:var(--shadow-sm); background:#fff; color:var(--ink);}
 .btn:hover{transform:translateY(-1px);}
