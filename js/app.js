@@ -364,11 +364,11 @@ function viewWork(v) {
       <input type="date" class="field" id="todoDate" value="${defDate}" style="width:150px" />
       <span class="ch-sub">性质</span>
       <div class="seg" id="catSeg">
-        ${CATS.map((c, i) => `<button data-cat="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
+        ${CATS.map((c, i) => `<button data-cat="${c}" class="cat-${c} ${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
       </div>
       <span class="ch-sub">范围</span>
       <div class="seg" id="scopeSeg">
-        ${SCOPES.map((c, i) => `<button data-scope="${c}" class="${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
+        ${SCOPES.map((c, i) => `<button data-scope="${c}" class="scope-${c} ${i === 0 ? 'on' : ''}">${c}</button>`).join('')}
       </div>
       <button class="btn primary" data-act="todo-add">＋ 添加</button>
     </div>
@@ -933,8 +933,8 @@ $('#view').addEventListener('click', e => {
     if (!item) { toast('任务不存在'); return; }
     openModal(`<h2>✏️ 修改任务</h2>
       <div class="row"><label>内容</label><textarea class="field" id="editText" rows="2" style="flex:1">${esc(item.text)}</textarea></div>
-      <div class="row"><label>工作性质</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
-      <div class="row"><label>归属范围</label><div class="seg" id="editScope">${SCOPES.map(c => `<button data-scope="${c}" class="${c === item.scope ? 'on' : ''}">${c}</button>`).join('')}</div></div>
+      <div class="row"><label>工作性质</label><div class="seg" id="editCat">${CATS.map(c => `<button data-cat="${c}" class="cat-${c} ${c === item.cat ? 'on' : ''}">${c}</button>`).join('')}</div></div>
+      <div class="row"><label>归属范围</label><div class="seg" id="editScope">${SCOPES.map(c => `<button data-scope="${c}" class="scope-${c} ${c === item.scope ? 'on' : ''}">${c}</button>`).join('')}</div></div>
       <div class="row"><label>日期</label><input type="date" class="field" id="editDate" value="${item.date}"></div>
       <div class="row"><button class="btn primary" data-act="todo-edit-do" data-id="${id}" data-date="${date}">保存</button></div>`);
   }
