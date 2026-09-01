@@ -126,8 +126,24 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .todo-add{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
 .todo-add .field{flex:1; min-width:180px;}
 .seg{display:inline-flex; flex-wrap:wrap; background:var(--green-50); border-radius:13px; padding:4px; gap:4px;}
-.seg button{padding:7px 13px; border-radius:10px; font-weight:700; font-size:13px; color:var(--ink-soft);}
-.seg button.on{background:#fff; color:var(--green-500); box-shadow:var(--shadow-sm);}
+.seg button{padding:7px 13px; border-radius:10px; font-weight:700; font-size:13px; transition:.15s;}
+.seg button.on{box-shadow:var(--shadow-sm); color:#fff;}
+
+/* 工作性质色块 */
+.seg .cat-稿件处理{background:#E8F5E9; color:#2E7D32;} .seg .cat-稿件处理.on{background:#43A047;}
+.seg .cat-项目对接{background:#E3F2FD; color:#1565C0;} .seg .cat-项目对接.on{background:#1E88E5;}
+.seg .cat-会议沟通{background:#F3E5F5; color:#6A1B9A;} .seg .cat-会议沟通.on{background:#8E24AA;}
+.seg .cat-人事招聘{background:#FCE4EC; color:#AD1457;} .seg .cat-人事招聘.on{background:#D81B60;}
+.seg .cat-日常管理{background:#FFF3E0; color:#E65100;} .seg .cat-日常管理.on{background:#FB8C00;}
+.seg .cat-学习培训{background:#E0F7FA; color:#00695C;} .seg .cat-学习培训.on{background:#00ACC1;}
+.seg .cat-临时交办{background:#FFEBEE; color:#C62828;} .seg .cat-临时交办.on{background:#E53935;}
+.seg .cat-其他{background:#ECEFF1; color:#455A64;} .seg .cat-其他.on{background:#607D8B;}
+
+/* 归属范围色块 */
+.seg .scope-组内{background:#E8F5E9; color:#2E7D32;} .seg .scope-组内.on{background:#43A047;}
+.seg .scope-科室{background:#E3F2FD; color:#1565C0;} .seg .scope-科室.on{background:#1E88E5;}
+.seg .scope-部门{background:#F3E5F5; color:#6A1B9A;} .seg .scope-部门.on{background:#8E24AA;}
+.seg .scope-外部{background:#FFF3E0; color:#E65100;} .seg .scope-外部.on{background:#FB8C00;}
 
 .todo-group{margin-top:6px;}
 .todo-day{border-radius:var(--radius-sm); overflow:hidden;}
