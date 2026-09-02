@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260902f'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260902g'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1386,7 +1386,7 @@ $('#view').addEventListener('click', e => {
   else if (act === 'team-tab') { state.team.activeTab = el.dataset.ttab; save(); viewTeamGoals($('#teamPanel')); }
   else if (act === 'team-save-goals') {
     $$('.team-target-input').forEach(input => {
-      const gid = input.dataset.gid, sgid = input.dataset.sgid, level = input.level;
+      const gid = input.dataset.gid, sgid = input.dataset.sgid, level = input.dataset.level;
       const val = input.value.trim();
       if (level === 'group') { const g = state.team.groups.find(x => x.id === gid); if (g) g.target = val; }
       else if (level === 'subgroup') {
