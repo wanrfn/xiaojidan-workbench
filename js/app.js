@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260902g'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260902h'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1803,9 +1803,10 @@ function boot() {
   if (syncActive()) { doPull(); }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && syncActive()) doPull(); });
   setInterval(() => { if (syncActive()) doPull(); }, 5 * 60 * 1000);
-  // 注册 PWA
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  // 注销 Service Worker：避免 SW 缓存 index/app.js 导致「改了不生效」
+  // 个人工具不需要离线，换来每次刷新都拉最新代码
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister())).catch(() => {});
   }
 }
 boot();

@@ -1,7 +1,7 @@
 // 轻量 Service Worker：纯网络模式，永远拉最新资源，不做任何缓存。
 // 目的：避免 PWA 缓存旧 app.js 导致「改了不生效」。
 // 版本号随 app.js 一起递增；新 SW 安装即激活并接管页面。
-const CACHE = 'workbench-v8-networkonly';
+const CACHE = 'workbench-v9-networkonly';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
