@@ -1,26 +1,21 @@
-// 轻量 Service Worker：缓存静态资源，支持离线 / 添加到手机桌面
-// 策略：网络优先（每次打开都拉最新），失败才用缓存，保证改了立刻生效
-const CACHE = 'workbench-v7';
-const ASSETS = ['./', './index.html', './css/style.css', './js/app.js', './manifest.webmanifest'];
+// 轻量 Service Worker：纯网络模式，永远拉最新资源，不做任何缓存。
+// 目的：避免 PWA 缓存旧 app.js 导致「改了不生效」。
+// 版本号随 app.js 一起递增；新 SW 安装即激活并接管页面。
+const CACHE = 'workbench-v8-networkonly';
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).catch(() => {}));
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))));
-  self.clients.claim();
+  // 清掉历史所有缓存，确保没有旧文件残留
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // 永远走网络，拿最新文件；失败（离线）才退回首页，保证离线也能打开壳子
   e.respondWith(
-    fetch(e.request, { cache: 'no-cache' }).then((res) => {
-      // 拉到新资源就更新缓存，供下次离线使用
-      const copy = res.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-      return res;
-    }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
+    fetch(e.request, { cache: 'no-cache' }).catch(() => caches.match('./index.html').then((hit) => hit || new Response('离线不可用', { status: 503 })))
   );
 });

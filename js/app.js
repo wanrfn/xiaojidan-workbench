@@ -8,6 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
+const APP_VERSION = '20260902f'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1287,7 +1288,8 @@ function openSettings() {
       <button class="btn sm yellow" data-act="sync-now">立即同步一次</button>
     </div>
     <hr style="border:none;border-top:1px dashed var(--line);margin:14px 0">
-    <div class="set-row"><span>清空所有数据</span><button class="btn sm ghost" data-act="wipe">清空</button></div>`);
+    <div class="set-row"><span>清空所有数据</span><button class="btn sm ghost" data-act="wipe">清空</button></div>
+    <div class="set-row" style="font-size:11px;color:var(--ink-soft)"><span>当前版本</span><span style="font-family:monospace">v${APP_VERSION}</span></div>`);
   const modeSel = $('#syncMode');
   const applyMode = () => {
     const cloud = modeSel.value === 'cloud';
