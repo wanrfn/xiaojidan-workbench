@@ -477,17 +477,18 @@ function renderTeamGoals(v) {
 function renderTeamMembers(v) {
   const T = state.team;
   const showAdd = T._showAddForm;
+  const editId = T._editMemberId;
   v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">共11人：>2年组5人 / 1-2年组6人</span></div>
   <div style="margin-bottom:12px"><button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button></div>
   ${showAdd ? `<div class="team-member-row team-add-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:12px">
     <span style="display:flex;flex-direction:column;gap:8px;flex:1">
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">姓名</label>
-        <input class="field" id="newMName" placeholder="成员姓名" style="flex:1">
+        <input class="field" id="newMName" placeholder="成员姓名" style="flex:1;min-width:120px">
         <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">个人目标%</label>
         <input type="number" class="field" id="newMTarget" placeholder="如 95" style="width:80px">
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">所属大组</label>
         <select class="field" id="newMGroup" style="width:140px">
           ${T.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
@@ -505,27 +506,50 @@ function renderTeamMembers(v) {
       T.members.map(m => {
         const g = T.groups.find(gr => gr.id === m.groupId);
         const sg = g ? g.subGroups.find(s => s.id === m.subGroupId) : null;
+        if (editId === m.id) {
+          return `<div class="team-member-row team-edit-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:10px">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:12.5px;color:var(--ink-soft)">姓名</label>
+              <input class="field" id="editMName" value="${esc(m.name)}" style="width:100px">
+              <label style="font-size:12.5px;color:var(--ink-soft)">个人目标%</label>
+              <input type="number" class="field" id="editMTarget" value="${m.personalTarget||''}" style="width:70px">
+              <label style="font-size:12.5px;color:var(--ink-soft)">大组</label>
+              <select class="field" id="editMGroup" style="width:140px">
+                ${T.groups.map(gg => `<option value="${gg.id}" ${gg.id===m.groupId?'selected':''}>${esc(gg.name)}</option>`).join('')}
+              </select>
+              <label style="font-size:12.5px;color:var(--ink-soft)">小小组</label>
+              <select class="field" id="editMSGroup" style="width:140px">
+                ${((g||T.groups[0]).subGroups||[]).map(ss => `<option value="${ss.id}" ${ss.id===m.subGroupId?'selected':''}>${esc(ss.name)}</option>`).join('')}
+              </select>
+              <button class="btn primary sm" data-act="team-edit-member-do" data-mid="${m.id}">💾 保存</button>
+              <button class="btn sm ghost" data-act="team-edit-member-cancel">取消</button>
+            </div>
+          </div>`;
+        }
         return `<div class="team-member-row">
           <span class="team-m-name">${esc(m.name)}</span>
-          <span class="team-m-target">个人目标: <input type="number" class="field" data-mid="${m.id}" data-fld="personalTarget" value="${m.personalTarget||''}" placeholder="%" style="width:70px"> %</span>
-          <span class="team-m-group">
-            所属: <select class="field" data-mid="${m.id}" data-fld="groupId" style="width:110px">
-              ${T.groups.map(gg => `<option value="${gg.id}" ${gg.id===m.groupId?'selected':''}>${esc(gg.name)}</option>`).join('')}
-            </select>
-            <select class="field team-sg-select" data-mid="${m.id}" data-fld="subGroupId" style="width:110px">
-              ${((g||T.groups[0]).subGroups||[]).map(ss => `<option value="${ss.id}" ${ss.id===m.subGroupId?'selected':''}>${esc(ss.name)}</option>`).join('')}
-            </select>
-          </span>
+          <span class="team-m-target">目标: ${m.personalTarget ? esc(m.personalTarget)+'%' : '<span style="color:var(--danger)">未填</span>'}</span>
+          <span class="team-m-group">${esc(g?g.name:'-')} / ${esc(sg?sg.name:'-')}</span>
+          <button class="btn sm ghost" data-act="team-edit-member" data-mid="${m.id}">✏️ 编辑</button>
           <button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger)">删除</button>
         </div>`;
       }).join('')
     }
   </div>
-  <div style="margin-top:12px"><button class="btn primary" data-act="team-save-members">💾 保存成员</button></div>
   </div>`;
-  // 大组联动小小组
+  // 大组联动小小组（添加表单）
   if (showAdd) {
     const gSel = $('#newMGroup'), sgSel = $('#newMSGroup');
+    if (gSel && sgSel) {
+      gSel.addEventListener('change', () => {
+        const g = T.groups.find(x => x.id === gSel.value);
+        sgSel.innerHTML = ((g ? g.subGroups : []) || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('');
+      });
+    }
+  }
+  // 大组联动小小组（编辑表单）
+  if (editId) {
+    const gSel = $('#editMGroup'), sgSel = $('#editMSGroup');
     if (gSel && sgSel) {
       gSel.addEventListener('change', () => {
         const g = T.groups.find(x => x.id === gSel.value);
@@ -1395,32 +1419,32 @@ $('#view').addEventListener('click', e => {
     state.team.groups.forEach(g => g.subGroups.forEach(sg => { if (sg.id === sgid) sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
     save(); viewTeamGoals($('#teamPanel'));
   }
-  else if (act === 'team-save-members') {
-    $$('[data-mid][data-fld]').forEach(input => {
-      const mid = input.dataset.mid, fld = input.fld;
-      const m = state.team.members.find(x => x.id === mid);
-      if (!m) return;
-      if (fld === 'groupId') {
-        // 从旧小组移除，加入新小组
-        const oldGid = m.groupId;
-        const newGid = input.value;
-        if (oldGid !== newGid) {
-          const oldG = state.team.groups.find(g => g.id === oldGid);
-          if (oldG) oldG.subGroups.forEach(sg => sg.memberIds = sg.memberIds.filter(id => id !== mid));
-          m.groupId = newGid;
-          m.subGroupId = '';
-        }
-      } else if (fld === 'subGroupId') {
-        const oldSgid = m.subGroupId, newSgid = input.value;
-        if (oldSgid !== newSgid) {
-          state.team.groups.forEach(g => g.subGroups.forEach(sg => { if (sg.id === oldSgid) sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
-          m.subGroupId = newSgid;
-          const g = state.team.groups.find(gr => gr.id === m.groupId);
-          if (g) { const sg = g.subGroups.find(s => s.id === newSgid); if (sg && !sg.memberIds.includes(mid)) sg.memberIds.push(mid); }
-        }
-      } else { m[fld] = input.value.trim(); }
-    });
-    save(); toast('成员信息已保存 ✅');
+  else if (act === 'team-edit-member') {
+    state.team._editMemberId = el.dataset.mid; save();
+    renderTeamMembers($('#teamPanel'));
+  }
+  else if (act === 'team-edit-member-cancel') {
+    state.team._editMemberId = ''; save();
+    renderTeamMembers($('#teamPanel'));
+  }
+  else if (act === 'team-edit-member-do') {
+    const mid = el.dataset.mid;
+    const m = state.team.members.find(x => x.id === mid);
+    if (!m) return;
+    const name = ($('#editMName').value || '').trim();
+    if (!name) { toast('姓名不能为空'); return; }
+    const newGid = $('#editMGroup').value, newSgid = $('#editMSGroup').value;
+    if (newGid !== m.groupId || newSgid !== m.subGroupId) {
+      state.team.groups.forEach(g => g.subGroups.forEach(sg => { sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
+      const g = state.team.groups.find(gr => gr.id === newGid);
+      if (g) { const sg = g.subGroups.find(s => s.id === newSgid); if (sg && !sg.memberIds.includes(mid)) sg.memberIds.push(mid); }
+    }
+    m.name = name;
+    m.personalTarget = ($('#editMTarget').value || '').trim();
+    m.groupId = newGid;
+    m.subGroupId = newSgid;
+    state.team._editMemberId = ''; save();
+    renderTeamMembers($('#teamPanel')); toast('已保存修改 ✅');
   }
   else if (act === 'team-create-week') {
     const dateStr = $('#newWeekDate').value || todayStr();
@@ -1435,7 +1459,7 @@ $('#view').addEventListener('click', e => {
     if (!state.team.weeks[wk]) { toast('周数据不存在'); return; }
     state.team.weeks[wk].data = state.team.weeks[wk].data || {};
     $$('.team-cell').forEach(input => {
-      const mid = input.dataset.mid, fld = input.fld;
+      const mid = input.dataset.mid, fld = input.dataset.fld;
       if (!mid || !fld) return;
       if (!state.team.weeks[wk].data[mid]) state.team.weeks[wk].data[mid] = {};
       let val;
