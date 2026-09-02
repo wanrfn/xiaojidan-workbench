@@ -1430,9 +1430,11 @@ $('#view').addEventListener('click', e => {
   else if (act === 'team-edit-member-do') {
     const mid = el.dataset.mid;
     const m = state.team.members.find(x => x.id === mid);
-    if (!m) return;
+    if (!m) { toast('❌ 成员不存在'); return; }
     const name = ($('#editMName').value || '').trim();
     if (!name) { toast('姓名不能为空'); return; }
+    const targetInput = $('#editMTarget');
+    const newTarget = targetInput ? (targetInput.value || '').trim() : '';
     const newGid = $('#editMGroup').value, newSgid = $('#editMSGroup').value;
     if (newGid !== m.groupId || newSgid !== m.subGroupId) {
       state.team.groups.forEach(g => g.subGroups.forEach(sg => { sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
@@ -1440,11 +1442,12 @@ $('#view').addEventListener('click', e => {
       if (g) { const sg = g.subGroups.find(s => s.id === newSgid); if (sg && !sg.memberIds.includes(mid)) sg.memberIds.push(mid); }
     }
     m.name = name;
-    m.personalTarget = ($('#editMTarget').value || '').trim();
+    m.personalTarget = newTarget;
     m.groupId = newGid;
     m.subGroupId = newSgid;
     state.team._editMemberId = ''; save();
-    renderTeamMembers($('#teamPanel')); toast('已保存修改 ✅');
+    renderTeamMembers($('#teamPanel'));
+    toast('✅ 已保存 ' + esc(m.name) + ' 目标: ' + (newTarget || '(空)') + '%');
   }
   else if (act === 'team-create-week') {
     const dateStr = $('#newWeekDate').value || todayStr();

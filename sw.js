@@ -1,6 +1,6 @@
 // 轻量 Service Worker：缓存静态资源，支持离线 / 添加到手机桌面
 // 策略：网络优先（每次打开都拉最新），失败才用缓存，保证改了立刻生效
-const CACHE = 'workbench-v6';
+const CACHE = 'workbench-v7';
 const ASSETS = ['./', './index.html', './css/style.css', './js/app.js', './manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
