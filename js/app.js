@@ -476,8 +476,30 @@ function renderTeamGoals(v) {
 /* ---- 成员管理 ---- */
 function renderTeamMembers(v) {
   const T = state.team;
+  const showAdd = T._showAddForm;
   v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">共11人：>2年组5人 / 1-2年组6人</span></div>
-  <div style="margin-bottom:12px"><button class="btn primary sm" data-act="team-add-member">＋ 添加成员</button></div>
+  <div style="margin-bottom:12px"><button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button></div>
+  ${showAdd ? `<div class="team-member-row team-add-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:12px">
+    <span style="display:flex;flex-direction:column;gap:8px;flex:1">
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">姓名</label>
+        <input class="field" id="newMName" placeholder="成员姓名" style="flex:1">
+        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">个人目标%</label>
+        <input type="number" class="field" id="newMTarget" placeholder="如 95" style="width:80px">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">所属大组</label>
+        <select class="field" id="newMGroup" style="width:140px">
+          ${T.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
+        </select>
+        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">所属小小组</label>
+        <select class="field" id="newMSGroup" style="width:140px">
+          ${(T.groups[0].subGroups||[]).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
+        </select>
+        <button class="btn primary sm" data-act="team-add-member-do-inline">✅ 确认添加</button>
+      </div>
+    </span>
+  </div>` : ''}
   <div class="team-member-list">
     ${T.members.length === 0 ? '<div class="empty">暂无成员，点击上方按钮添加</div>' :
       T.members.map(m => {
@@ -501,6 +523,16 @@ function renderTeamMembers(v) {
   </div>
   <div style="margin-top:12px"><button class="btn primary" data-act="team-save-members">💾 保存成员</button></div>
   </div>`;
+  // 大组联动小小组
+  if (showAdd) {
+    const gSel = $('#newMGroup'), sgSel = $('#newMSGroup');
+    if (gSel && sgSel) {
+      gSel.addEventListener('change', () => {
+        const g = T.groups.find(x => x.id === gSel.value);
+        sgSel.innerHTML = ((g ? g.subGroups : []) || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('');
+      });
+    }
+  }
 }
 
 /* ---- 周数据录入 ---- */
@@ -1339,33 +1371,17 @@ $('#view').addEventListener('click', e => {
     save(); toast('目标已保存 ✅');
   }
   else if (act === 'team-add-member') {
-    openModal(`<h2>＋ 添加成员</h2>
-      <div class="row"><label>姓名</label><input class="field" id="newMName" placeholder="成员姓名" style="flex:1"></div>
-      <div class="row"><label>个人目标%</label><input type="number" class="field" id="newMTarget" placeholder="如 95" style="flex:1"></div>
-      <div class="row"><label>所属大组</label><select class="field" id="newMGroup" style="flex:1">
-        ${state.team.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
-      </select></div>
-      <div class="row"><label>所属小小组</label><select class="field" id="newMSGroup" style="flex:1">
-        ${(state.team.groups[0].subGroups||[]).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
-      </select></div>
-      <div class="row"><button class="btn primary" data-act="team-add-member-do">添加</button></div>`);
-    const gSel = $('#newMGroup'), sgSel = $('#newMSGroup');
-    if (gSel && sgSel) {
-      gSel.addEventListener('change', () => {
-        const g = state.team.groups.find(x => x.id === gSel.value);
-        sgSel.innerHTML = ((g ? g.subGroups : []) || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('');
-      });
-    }
+    state.team._showAddForm = !state.team._showAddForm; save(); viewTeamGoals($('#teamPanel'));
   }
-  else if (act === 'team-add-member-do') {
-    const name = $('#newMName').value.trim();
+  else if (act === 'team-add-member-do-inline') {
+    const name = ($('#newMName').value || '').trim();
     if (!name) { toast('请输入姓名'); return; }
     const mid = uid();
-    state.team.members.push({ id: mid, name, personalTarget: $('#newMTarget').value.trim(), groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
-    // 加入小小组
+    state.team.members.push({ id: mid, name, personalTarget: ($('#newMTarget').value || '').trim(), groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
     const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
     if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
-    save(); closeModal(); viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
+    state.team._showAddForm = false;
+    save(); viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
   }
   else if (act === 'team-del-member') {
     const mid = el.dataset.mid;
