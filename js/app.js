@@ -1349,6 +1349,13 @@ $('#view').addEventListener('click', e => {
         ${(state.team.groups[0].subGroups||[]).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
       </select></div>
       <div class="row"><button class="btn primary" data-act="team-add-member-do">添加</button></div>`);
+    const gSel = $('#newMGroup'), sgSel = $('#newMSGroup');
+    if (gSel && sgSel) {
+      gSel.addEventListener('change', () => {
+        const g = state.team.groups.find(x => x.id === gSel.value);
+        sgSel.innerHTML = ((g ? g.subGroups : []) || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('');
+      });
+    }
   }
   else if (act === 'team-add-member-do') {
     const name = $('#newMName').value.trim();
@@ -1602,6 +1609,16 @@ $('#modalRoot').addEventListener('click', e => {
     item.text = text; item.cat = cat; item.scope = sc;
     if (ndate !== odate) { item.date = ndate; arr.splice(idx, 1); (state.work.todos[ndate] = state.work.todos[ndate] || []).push(item); }
     save(); closeModal(); viewWork($('#view')); toast('已保存');
+  }
+  if (act === 'team-add-member-do') {
+    const name = ($('#newMName').value || '').trim();
+    if (!name) { toast('请输入姓名'); return; }
+    const mid = uid();
+    state.team.members.push({ id: mid, name, personalTarget: ($('#newMTarget').value || '').trim(), groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
+    const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
+    if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
+    save(); closeModal(); state.team.activeTab = 'members'; viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
+    return;
   }
   handleReport(act, el);
 });
