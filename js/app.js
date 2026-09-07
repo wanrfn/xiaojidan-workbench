@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260903a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260907a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -262,10 +262,31 @@ function greet() {
   if (h < 6) return '夜深了'; if (h < 11) return '早上好'; if (h < 14) return '中午好';
   if (h < 18) return '下午好'; return '晚上好';
 }
+/* ---------- 财务月（每期 15 日 至 次月 14 日，按公司实际排期微调） ---------- */
+const FIN_PERIODS_2026 = [
+  ['2026-08-14', '2026-09-14'],
+  ['2026-09-15', '2026-10-14'],
+  ['2026-10-15', '2026-11-13'],
+  ['2026-11-14', '2026-12-15'],
+];
+const fmtFin = d => `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}（${WEEK[d.getDay()]}）`;
+function finPeriodStr(d) {
+  const t = todayStr(d);
+  for (const [s, e] of FIN_PERIODS_2026) {
+    if (t >= s && t <= e) { const [a, b] = [new Date(s + 'T00:00:00'), new Date(e + 'T00:00:00')]; return `${fmtFin(a)} – ${fmtFin(b)}`; }
+  }
+  // 列表之外的日期，按通用规则推算：15日 至 次月14日
+  const dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  let start, end;
+  if (dt.getDate() >= 15) { start = new Date(dt.getFullYear(), dt.getMonth(), 15); end = new Date(dt.getFullYear(), dt.getMonth() + 1, 14); }
+  else { start = new Date(dt.getFullYear(), dt.getMonth() - 1, 15); end = new Date(dt.getFullYear(), dt.getMonth(), 14); }
+  return `${fmtFin(start)} – ${fmtFin(end)}`;
+}
 function renderTopbar(title) {
   $('#pageTitle').textContent = title;
   const d = new Date();
-  $('#pageDate').textContent = `${greet()} · ${todayStr()} ${WEEK[d.getDay()]}`;
+  $('#pageDate').innerHTML = `${greet()} · ${todayStr(d)} ${WEEK[d.getDay()]}` +
+    `<br><span style="font-size:11.5px;color:var(--ink-soft)">📅 当前财务月：${finPeriodStr(d)}</span>`;
 }
 
 /* ---------- 导航栏 ---------- */
