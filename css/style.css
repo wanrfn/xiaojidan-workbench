@@ -394,6 +394,24 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .tm-td-act.tm-sg-d{background:#FCFAFF}
 .tm-td-target.tm-sg-d .tm-target-cell{border-color:#C4A0F0!important}
 
+/* 月份切换器 */
+.tm-month-sw{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--green-50);border-radius:10px}
+.tm-month-cur-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed var(--line-strong)}
+.tm-month-cur-title{font-weight:800;font-size:14px;color:var(--ink)}
+.tm-hist-title{font-weight:800;font-size:13.5px;margin:20px 0 10px;color:var(--ink-soft)}
+/* 折叠月份卡片 */
+.tm-month-fold{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;background:var(--panel,#fff)}
+.tm-month-fold.open{border-color:var(--green-200)}
+.tm-month-fold-head{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--green-50);cursor:pointer;user-select:none}
+.tm-month-fold-head:hover{background:var(--green-100)}
+.tm-fold-hit{display:inline-flex;align-items:center;gap:7px;flex:1;cursor:pointer}
+.tm-fold-arrow{font-size:12px;color:var(--ink-soft);width:12px;display:inline-block}
+.tm-fold-name{font-weight:800;font-size:13.5px}
+.tm-fold-meta{font-size:12px;color:var(--ink-soft)}
+.tm-fold-tag{font-size:11px;padding:1px 6px;border-radius:6px;background:#FFF3D6;color:#8a6d1f;font-weight:700}
+.tm-month-fold-body{padding:12px;border-top:1px solid var(--line)}
+.tm-month-fold-body .tm-table{margin-bottom:14px}
+
 /* 周数据表格 */
 .team-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .team-table th{background:var(--green-50);padding:7px 5px;text-align:left;font-weight:700;white-space:nowrap;border-bottom:2px solid var(--line-strong)}
