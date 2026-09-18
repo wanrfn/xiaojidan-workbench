@@ -355,7 +355,44 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .tm-td-act{text-align:center}
 .tm-target-cell{width:78px!important;font-weight:800;text-align:center;border:1px solid var(--green-200)!important}
 .tm-target-cell:focus{border-color:var(--green-500)!important;box-shadow:0 0 0 2px var(--green-100)}
-.tm-tfoot td{background:#F5C542;font-weight:800;font-size:13px}
+.tm-tfoot td{font-weight:800;font-size:13px}
+.tm-legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px;color:var(--ink-soft)}
+.tm-lg{display:inline-flex;align-items:center;gap:5px}
+.tm-dot{width:13px;height:13px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.12)}
+.tm-dot-a{background:#FFD6E0;border-left:4px solid #FF9EB5}
+.tm-dot-b{background:#D6F0FF;border-left:4px solid #7EC8F5}
+.tm-dot-c{background:#E0F7E9;border-left:4px solid #8DDCAE}
+.tm-dot-d{background:#F0E2FF;border-left:4px solid #C4A0F0}
+
+/* 四个小小组马卡龙配色（A/B/C/D 循环）—— 直接作用于单元格 */
+/* A 组：马卡龙粉 */
+.tm-td-grp.tm-sg-a{background:#FFD6E0;border-left:5px solid #FF9EB5}
+.tm-td-target.tm-sg-a{background:#FFF5F8}
+.tm-td-sgtarget.tm-sg-a{background:#FFD6E0}
+.tm-td-name.tm-sg-a{background:#FFF9FB}
+.tm-td-act.tm-sg-a{background:#FFF9FB}
+.tm-sg-a.tm-target-cell,.tm-td-target.tm-sg-a .tm-target-cell{border-color:#FF9EB5!important}
+/* B 组：马卡龙蓝 */
+.tm-td-grp.tm-sg-b{background:#D6F0FF;border-left:5px solid #7EC8F5}
+.tm-td-target.tm-sg-b{background:#F5FBFF}
+.tm-td-sgtarget.tm-sg-b{background:#D6F0FF}
+.tm-td-name.tm-sg-b{background:#FAFDFF}
+.tm-td-act.tm-sg-b{background:#FAFDFF}
+.tm-td-target.tm-sg-b .tm-target-cell{border-color:#7EC8F5!important}
+/* C 组：马卡龙绿 */
+.tm-td-grp.tm-sg-c{background:#E0F7E9;border-left:5px solid #8DDCAE}
+.tm-td-target.tm-sg-c{background:#F5FDF8}
+.tm-td-sgtarget.tm-sg-c{background:#E0F7E9}
+.tm-td-name.tm-sg-c{background:#FAFEFA}
+.tm-td-act.tm-sg-c{background:#FAFEFA}
+.tm-td-target.tm-sg-c .tm-target-cell{border-color:#8DDCAE!important}
+/* D 组：马卡龙紫 */
+.tm-td-grp.tm-sg-d{background:#F0E2FF;border-left:5px solid #C4A0F0}
+.tm-td-target.tm-sg-d{background:#FAF5FF}
+.tm-td-sgtarget.tm-sg-d{background:#F0E2FF}
+.tm-td-name.tm-sg-d{background:#FCFAFF}
+.tm-td-act.tm-sg-d{background:#FCFAFF}
+.tm-td-target.tm-sg-d .tm-target-cell{border-color:#C4A0F0!important}
 
 /* 周数据表格 */
 .team-table{width:100%;border-collapse:collapse;font-size:12.5px}
