@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260907a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260918a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -450,6 +450,12 @@ function todoRow(tk) {
 }
 
 /* =================== 小组目标管理 =================== */
+// 统一重渲染入口：始终渲染到最外层 #workPanel，避免把 team 视图套进 #teamPanel 造成层级错乱
+function renderTeam() {
+  const panel = $('#workPanel');
+  if (panel) viewTeamGoals(panel);
+  else viewWork($('#view'));
+}
 function viewTeamGoals(v) {
   const tab = state.team.activeTab || 'goals';
   v.innerHTML = `
@@ -495,83 +501,70 @@ function renderTeamGoals(v) {
   </div>`;
 }
 
-/* ---- 成员管理 ---- */
+/* ---- 成员管理（表格式，目标行内直填） ---- */
 function renderTeamMembers(v) {
   const T = state.team;
   const showAdd = T._showAddForm;
-  const editId = T._editMemberId;
-  v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">共11人：>2年组5人 / 1-2年组6人</span></div>
-  <div style="margin-bottom:12px"><button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button></div>
-  ${showAdd ? `<div class="team-member-row team-add-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:12px">
-    <span style="display:flex;flex-direction:column;gap:8px;flex:1">
+  const addForm = showAdd ? `<div class="team-add-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">姓名</label>
+        <label class="tm-lb">姓名</label>
         <input class="field" id="newMName" placeholder="成员姓名" style="flex:1;min-width:120px">
-        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">个人目标%</label>
-        <input type="text" class="field" id="newMTarget" placeholder="如 95" style="width:80px">
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">所属大组</label>
-        <select class="field" id="newMGroup" style="width:140px">
+        <label class="tm-lb">个人目标%</label>
+        <input type="text" class="field" id="newMTarget" placeholder="如 125" style="width:80px">
+        <label class="tm-lb">大组</label>
+        <select class="field" id="newMGroup" style="width:130px">
           ${T.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
         </select>
-        <label style="font-size:12.5px;color:var(--ink-soft);white-space:nowrap">所属小小组</label>
-        <select class="field" id="newMSGroup" style="width:140px">
-          ${(T.groups[0].subGroups||[]).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
+        <label class="tm-lb">小小组</label>
+        <select class="field" id="newMSGroup" style="width:130px">
+          ${((T.groups[0] || {}).subGroups || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('')}
         </select>
         <button class="btn primary sm" data-act="team-add-member-do-inline">✅ 确认添加</button>
       </div>
-    </span>
-  </div>` : ''}
-  <div class="team-member-list">
-    ${T.members.length === 0 ? '<div class="empty">暂无成员，点击上方按钮添加</div>' :
-      T.members.map(m => {
-        const g = T.groups.find(gr => gr.id === m.groupId);
-        const sg = g ? g.subGroups.find(s => s.id === m.subGroupId) : null;
-        if (editId === m.id) {
-          return `<div class="team-member-row team-edit-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:10px">
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <label style="font-size:12.5px;color:var(--ink-soft)">姓名</label>
-              <input class="field" id="editMName" value="${esc(m.name)}" style="width:100px">
-              <label style="font-size:12.5px;color:var(--ink-soft)">个人目标%</label>
-              <input type="text" class="field" id="editMTarget" value="${esc(m.personalTarget||'')}" style="width:70px">
-              <label style="font-size:12.5px;color:var(--ink-soft)">大组</label>
-              <select class="field" id="editMGroup" style="width:140px">
-                ${T.groups.map(gg => `<option value="${gg.id}" ${gg.id===m.groupId?'selected':''}>${esc(gg.name)}</option>`).join('')}
-              </select>
-              <label style="font-size:12.5px;color:var(--ink-soft)">小小组</label>
-              <select class="field" id="editMSGroup" style="width:140px">
-                ${((g||T.groups[0]).subGroups||[]).map(ss => `<option value="${ss.id}" ${ss.id===m.subGroupId?'selected':''}>${esc(ss.name)}</option>`).join('')}
-              </select>
-              <button class="btn primary sm" data-act="team-edit-member-do" data-mid="${m.id}">💾 保存</button>
-              <button class="btn sm ghost" data-act="team-edit-member-cancel">取消</button>
-            </div>
-          </div>`;
-        }
-        return `<div class="team-member-row">
-          <span class="team-m-name">${esc(m.name)}</span>
-          <span class="team-m-target">目标: ${m.personalTarget ? esc(m.personalTarget)+'%' : '<span style="color:var(--danger)">未填</span>'}</span>
-          <span class="team-m-group">${esc(g?g.name:'-')} / ${esc(sg?sg.name:'-')}</span>
-          <button class="btn sm ghost" data-act="team-edit-member" data-mid="${m.id}">✏️ 编辑</button>
-          <button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger)">删除</button>
-        </div>`;
-      }).join('')
-    }
+    </div>` : '';
+
+  // 按「大组 → 小小组」分组渲染表格
+  const sections = T.groups.map(g => {
+    const rows = [];
+    (g.subGroups || []).forEach(sg => {
+      const mems = T.members.filter(m => m.subGroupId === sg.id || (m.groupId === g.id && m.subGroupId === sg.id));
+      mems.forEach((m, i) => {
+        rows.push(`<tr>
+          <td class="tm-td-grp">${i === 0 ? esc(sg.name) : ''}</td>
+          <td class="tm-td-name">${esc(m.name)}</td>
+          <td class="tm-td-target"><input type="text" class="field tm-target-cell" data-mid="${m.id}" value="${esc(m.personalTarget || '')}" placeholder="—" style="width:78px;text-align:center"></td>
+          <td class="tm-td-sgtarget">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
+          <td class="tm-td-act"><button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button></td>
+        </tr>`);
+      });
+      if (!mems.length) {
+        rows.push(`<tr><td class="tm-td-grp">${esc(sg.name)}</td><td colspan="3" style="color:var(--ink-faint);font-size:12.5px">暂无成员</td><td class="tm-td-act"></td></tr>`);
+      }
+    });
+    const gTargets = T.members.filter(m => m.groupId === g.id).map(m => parseFloat(m.personalTarget)).filter(n => !isNaN(n));
+    const gAvg = gTargets.length ? (gTargets.reduce((a, b) => a + b, 0) / gTargets.length).toFixed(2) : '';
+    return `<div class="tm-group-block">
+      <div class="tm-group-title">${esc(g.name)}</div>
+      <table class="tm-table">
+        <thead><tr><th style="width:90px">组别</th><th>Name</th><th style="width:90px">个人目标</th><th style="width:110px">小小组完成率目标</th><th style="width:40px"></th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+        <tfoot><tr class="tm-tfoot"><td colspan="3">入职年限总目标</td><td>${gAvg ? gAvg + '%' : '—'}</td><td></td></tr></tfoot>
+      </table>
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">目标可直接在表格里填写，改完点下方保存</span></div>
+  <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button>
+    <button class="btn sm" data-act="team-save-member-targets">💾 保存所有目标</button>
   </div>
+  ${addForm}
+  ${sections || '<div class="empty">暂无分组，请先在「目标设置」中配置</div>'}
   </div>`;
+
   // 大组联动小小组（添加表单）
   if (showAdd) {
     const gSel = $('#newMGroup'), sgSel = $('#newMSGroup');
-    if (gSel && sgSel) {
-      gSel.addEventListener('change', () => {
-        const g = T.groups.find(x => x.id === gSel.value);
-        sgSel.innerHTML = ((g ? g.subGroups : []) || []).map(sg => `<option value="${sg.id}">${esc(sg.name)}</option>`).join('');
-      });
-    }
-  }
-  // 大组联动小小组（编辑表单）
-  if (editId) {
-    const gSel = $('#editMGroup'), sgSel = $('#editMSGroup');
     if (gSel && sgSel) {
       gSel.addEventListener('change', () => {
         const g = T.groups.find(x => x.id === gSel.value);
@@ -1404,7 +1397,7 @@ $('#view').addEventListener('click', e => {
     const day = el.closest('.todo-day'); day.classList.toggle('collapsed');
   }
   /* ---- 小组目标管理事件 ---- */
-  else if (act === 'team-tab') { state.team.activeTab = el.dataset.ttab; save(); viewTeamGoals($('#teamPanel')); }
+  else if (act === 'team-tab') { state.team.activeTab = el.dataset.ttab; save(); renderTeam(); }
   else if (act === 'team-save-goals') {
     $$('.team-target-input').forEach(input => {
       const gid = input.dataset.gid, sgid = input.dataset.sgid, level = input.dataset.level;
@@ -1418,7 +1411,7 @@ $('#view').addEventListener('click', e => {
     save(); toast('目标已保存 ✅');
   }
   else if (act === 'team-add-member') {
-    state.team._showAddForm = !state.team._showAddForm; save(); viewTeamGoals($('#teamPanel'));
+    state.team._showAddForm = !state.team._showAddForm; save(); renderTeam();
   }
   else if (act === 'team-add-member-do-inline') {
     const name = ($('#newMName').value || '').trim();
@@ -1430,27 +1423,39 @@ $('#view').addEventListener('click', e => {
     const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
     if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
     state.team._showAddForm = false;
-    save(); viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
+    save(); renderTeam(); toast('成员已添加 ✅');
   }
   else if (act === 'team-del-member') {
     const mid = el.dataset.mid;
     if (!confirm('确定删除该成员？')) return;
     state.team.members = state.team.members.filter(m => m.id !== mid);
     state.team.groups.forEach(g => g.subGroups.forEach(sg => sg.memberIds = sg.memberIds.filter(id => id !== mid)));
-    save(); viewTeamGoals($('#teamPanel')); toast('已删除');
+    save(); renderTeam(); toast('已删除');
   }
   else if (act === 'team-rm-member-sg') {
     const mid = el.dataset.mid, sgid = el.dataset.sgid;
     state.team.groups.forEach(g => g.subGroups.forEach(sg => { if (sg.id === sgid) sg.memberIds = sg.memberIds.filter(id => id !== mid); }));
-    save(); viewTeamGoals($('#teamPanel'));
+    save(); renderTeam();
+  }
+  else if (act === 'team-save-member-targets') {
+    let n = 0;
+    $$('.tm-target-cell').forEach(input => {
+      const mid = input.dataset.mid;
+      const m = state.team.members.find(x => x.id === mid);
+      if (!m) return;
+      m.personalTarget = (input.value || '').trim().replace(/[^\d.]/g, '');
+      n++;
+    });
+    save(); renderTeam();
+    toast(`✅ 已保存 ${n} 位成员的目标`);
   }
   else if (act === 'team-edit-member') {
     state.team._editMemberId = el.dataset.mid; save();
-    renderTeamMembers($('#teamPanel'));
+    renderTeam();
   }
   else if (act === 'team-edit-member-cancel') {
     state.team._editMemberId = ''; save();
-    renderTeamMembers($('#teamPanel'));
+    renderTeam();
   }
   else if (act === 'team-edit-member-do') {
     const mid = el.dataset.mid;
@@ -1482,8 +1487,7 @@ $('#view').addEventListener('click', e => {
       console.warn('team-edit-member-do 分组同步失败（目标已保存）:', err);
     }
     state.team._editMemberId = ''; save();
-    const panel = $('#teamPanel');
-    if (panel) renderTeamMembers(panel); else viewTeamGoals($('#view'));
+    renderTeam();
     toast('✅ 已保存 ' + esc(m.name) + ' 目标: ' + (newTarget || '(空)') + '%');
   }
   else if (act === 'team-create-week') {
@@ -1492,8 +1496,7 @@ $('#view').addEventListener('click', e => {
     if (state.team.weeks[wk]) { toast('该周已存在'); return; }
     state.team.weeks[wk] = { weekDate: dateStr, data: {} };
     state.team._selectedWeek = wk; save();
-    renderTeamWeekly($('#teamPanel')); toast(`已创建 ${wk}`);
-  }
+    renderTeam(); toast(`已创建 ${wk}`);  }
   else if (act === 'team-save-week') {
     const wk = el.dataset.week;
     if (!state.team.weeks[wk]) { toast('周数据不存在'); return; }
@@ -1699,7 +1702,7 @@ $('#modalRoot').addEventListener('click', e => {
     state.team.members.push({ id: mid, name, personalTarget: nt, groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
     const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
     if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
-    save(); closeModal(); state.team.activeTab = 'members'; viewTeamGoals($('#teamPanel')); toast('成员已添加 ✅');
+    save(); closeModal(); state.team.activeTab = 'members'; renderTeam(); toast('成员已添加 ✅');
     return;
   }
   handleReport(act, el);
