@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260918a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260918b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -524,21 +524,26 @@ function renderTeamMembers(v) {
     </div>` : '';
 
   // 按「大组 → 小小组」分组渲染表格
+  const SG_COLORS = ['a', 'b', 'c', 'd']; // 马卡龙配色，A/B/C/D 依次
+  let sgGlobal = 0; // 全局小小组序号，保证四个小组四色不重复
+  const allSubGroups = T.groups.reduce((acc, g) => acc.concat((g.subGroups || []).map(sg => ({ g, sg }))), []);
   const sections = T.groups.map(g => {
     const rows = [];
     (g.subGroups || []).forEach(sg => {
+      const colorKey = 'tm-sg-' + SG_COLORS[sgGlobal % SG_COLORS.length];
+      sgGlobal++;
       const mems = T.members.filter(m => m.subGroupId === sg.id || (m.groupId === g.id && m.subGroupId === sg.id));
       mems.forEach((m, i) => {
         rows.push(`<tr>
-          <td class="tm-td-grp">${i === 0 ? esc(sg.name) : ''}</td>
-          <td class="tm-td-name">${esc(m.name)}</td>
-          <td class="tm-td-target"><input type="text" class="field tm-target-cell" data-mid="${m.id}" value="${esc(m.personalTarget || '')}" placeholder="—" style="width:78px;text-align:center"></td>
-          <td class="tm-td-sgtarget">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
-          <td class="tm-td-act"><button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button></td>
+          <td class="tm-td-grp ${colorKey}">${i === 0 ? esc(sg.name) : ''}</td>
+          <td class="tm-td-name ${colorKey}">${esc(m.name)}</td>
+          <td class="tm-td-target ${colorKey}"><input type="text" class="field tm-target-cell" data-mid="${m.id}" value="${esc(m.personalTarget || '')}" placeholder="—" style="width:78px;text-align:center"></td>
+          <td class="tm-td-sgtarget ${colorKey}">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
+          <td class="tm-td-act ${colorKey}"><button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button></td>
         </tr>`);
       });
       if (!mems.length) {
-        rows.push(`<tr><td class="tm-td-grp">${esc(sg.name)}</td><td colspan="3" style="color:var(--ink-faint);font-size:12.5px">暂无成员</td><td class="tm-td-act"></td></tr>`);
+        rows.push(`<tr><td class="tm-td-grp ${colorKey}">${esc(sg.name)}</td><td colspan="3" class="${colorKey}" style="color:var(--ink-faint);font-size:12.5px">暂无成员</td><td class="tm-td-act ${colorKey}"></td></tr>`);
       }
     });
     const gTargets = T.members.filter(m => m.groupId === g.id).map(m => parseFloat(m.personalTarget)).filter(n => !isNaN(n));
@@ -553,12 +558,16 @@ function renderTeamMembers(v) {
     </div>`;
   }).join('');
 
+  const legend = `<div class="tm-legend">
+    ${allSubGroups.map((o, i) => `<span class="tm-lg"><i class="tm-dot tm-dot-${SG_COLORS[i % SG_COLORS.length]}"></i>${esc(o.sg.name)}</span>`).join('')}
+  </div>`;
   v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">目标可直接在表格里填写，改完点下方保存</span></div>
   <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button>
     <button class="btn sm" data-act="team-save-member-targets">💾 保存所有目标</button>
   </div>
   ${addForm}
+  ${legend}
   ${sections || '<div class="empty">暂无分组，请先在「目标设置」中配置</div>'}
   </div>`;
 
