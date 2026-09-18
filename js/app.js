@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260918b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260918c'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -224,6 +224,8 @@ function seed() {
         ]}
       ],
       members: [],
+      months: {},          // { '2026-09': { targets: {mid: '125'}, collapsed: false } }
+      currentMonth: '',    // 当前查看的月份 'YYYY-MM'，空 = 自动取当月
       weeks: {}
     },
     settings: { sync: { mode: 'local', url: '', enabled: false, cloudId: '', cloudUrl: '', cloudKey: '' } },
@@ -250,6 +252,9 @@ function load() {
   } catch (e) { return seed(); }
 }
 let state = load();
+// 老数据迁移：把成员身上的 personalTarget 归入 2026-09，并初始化当前月份
+migrateTeamMonths();
+if (!state.team.currentMonth) state.team.currentMonth = monthKey();
 let _pushTimer = null, _lastPush = 0, _syncing = false;
 function save(silent) {
   localStorage.setItem(KEY, JSON.stringify(state));
@@ -501,10 +506,52 @@ function renderTeamGoals(v) {
   </div>`;
 }
 
-/* ---- 成员管理（表格式，目标行内直填） ---- */
+/* ---- 月份工具（成员目标按月存档） ---- */
+// 切换查看的月份：离开的月份自动收起
+function switchMonth(mk) {
+  const T = state.team;
+  const prev = curMonth();
+  if (prev && prev !== mk) { const po = ensureMonth(prev); po.collapsed = true; }
+  ensureMonth(mk).collapsed = false;
+  T.currentMonth = mk;
+  save(); renderTeam();
+}
+function monthKey(d) { d = d || new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+function monthLabel(k) { if (!k) return ''; const [y, m] = k.split('-'); return `${y}年${parseInt(m, 10)}月`; }
+function curMonth() { return state.team.currentMonth || monthKey(); }
+function ensureMonth(k) {
+  const T = state.team;
+  if (!T.months) T.months = {};
+  if (!T.months[k]) T.months[k] = { targets: {}, collapsed: false };
+  if (!T.months[k].targets) T.months[k].targets = {};
+  return T.months[k];
+}
+// 该月某成员的目标值
+function mTarget(k, mid) {
+  const mo = (state.team.months || {})[k];
+  if (mo && mo.targets && mo.targets[mid] != null && mo.targets[mid] !== '') return mo.targets[mid];
+  // 兼容旧数据：仅当月回退到成员身上的 personalTarget
+  if (k === monthKey()) { const m = state.team.members.find(x => x.id === mid); if (m && m.personalTarget) return m.personalTarget; }
+  return '';
+}
+// 把老结构（成员身上的 personalTarget）一次性迁移到 2026-09
+function migrateTeamMonths() {  const T = state.team;
+  if (!T.months) T.months = {};
+  const legacy = T.members.filter(m => m.personalTarget);
+  if (!legacy.length) return false;
+  const k = '2026-09';
+  const mo = ensureMonth(k);
+  let n = 0;
+  legacy.forEach(m => { if (mo.targets[m.id] == null || mo.targets[m.id] === '') { mo.targets[m.id] = m.personalTarget; n++; } });
+  if (!T.currentMonth) T.currentMonth = monthKey();
+  return n > 0;
+}
+
 function renderTeamMembers(v) {
   const T = state.team;
   const showAdd = T._showAddForm;
+  const activeM = curMonth();
+  const thisM = monthKey();
   const addForm = showAdd ? `<div class="team-add-form" style="background:var(--green-50);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <label class="tm-lb">姓名</label>
@@ -521,55 +568,106 @@ function renderTeamMembers(v) {
         </select>
         <button class="btn primary sm" data-act="team-add-member-do-inline">✅ 确认添加</button>
       </div>
+      <div style="margin-top:8px;font-size:12px;color:var(--ink-soft)">目标将计入当前查看月份：<b>${monthLabel(activeM)}</b></div>
     </div>` : '';
 
-  // 按「大组 → 小小组」分组渲染表格
   const SG_COLORS = ['a', 'b', 'c', 'd']; // 马卡龙配色，A/B/C/D 依次
-  let sgGlobal = 0; // 全局小小组序号，保证四个小组四色不重复
   const allSubGroups = T.groups.reduce((acc, g) => acc.concat((g.subGroups || []).map(sg => ({ g, sg }))), []);
-  const sections = T.groups.map(g => {
-    const rows = [];
-    (g.subGroups || []).forEach(sg => {
-      const colorKey = 'tm-sg-' + SG_COLORS[sgGlobal % SG_COLORS.length];
-      sgGlobal++;
-      const mems = T.members.filter(m => m.subGroupId === sg.id || (m.groupId === g.id && m.subGroupId === sg.id));
-      mems.forEach((m, i) => {
-        rows.push(`<tr>
-          <td class="tm-td-grp ${colorKey}">${i === 0 ? esc(sg.name) : ''}</td>
-          <td class="tm-td-name ${colorKey}">${esc(m.name)}</td>
-          <td class="tm-td-target ${colorKey}"><input type="text" class="field tm-target-cell" data-mid="${m.id}" value="${esc(m.personalTarget || '')}" placeholder="—" style="width:78px;text-align:center"></td>
-          <td class="tm-td-sgtarget ${colorKey}">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
-          <td class="tm-td-act ${colorKey}"><button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button></td>
-        </tr>`);
+
+  // 通用：渲染某个月份的「大组 → 小小组」表格
+  const renderMonthTables = (mk) => {
+    let si = 0;
+    return T.groups.map(g => {
+      const rows = [];
+      (g.subGroups || []).forEach(sg => {
+        const colorKey = 'tm-sg-' + SG_COLORS[si % SG_COLORS.length];
+        si++;
+        const mems = T.members.filter(m => m.subGroupId === sg.id || (m.groupId === g.id && m.subGroupId === sg.id));
+        mems.forEach((m, i) => {
+          const val = mTarget(mk, m.id);
+          rows.push(`<tr>
+            <td class="tm-td-grp ${colorKey}">${i === 0 ? esc(sg.name) : ''}</td>
+            <td class="tm-td-name ${colorKey}">${esc(m.name)}</td>
+            <td class="tm-td-target ${colorKey}"><input type="text" class="field tm-target-cell" data-mid="${m.id}" data-mk="${mk}" value="${esc(val)}" placeholder="—" style="width:78px;text-align:center"></td>
+            <td class="tm-td-sgtarget ${colorKey}">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
+            <td class="tm-td-act ${colorKey}">${mk === activeM ? `<button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button>` : ''}</td>
+          </tr>`);
+        });
+        if (!mems.length) {
+          rows.push(`<tr><td class="tm-td-grp ${colorKey}">${esc(sg.name)}</td><td colspan="3" class="${colorKey}" style="color:var(--ink-faint);font-size:12.5px">暂无成员</td><td class="tm-td-act ${colorKey}"></td></tr>`);
+        }
       });
-      if (!mems.length) {
-        rows.push(`<tr><td class="tm-td-grp ${colorKey}">${esc(sg.name)}</td><td colspan="3" class="${colorKey}" style="color:var(--ink-faint);font-size:12.5px">暂无成员</td><td class="tm-td-act ${colorKey}"></td></tr>`);
-      }
-    });
-    const gTargets = T.members.filter(m => m.groupId === g.id).map(m => parseFloat(m.personalTarget)).filter(n => !isNaN(n));
-    const gAvg = gTargets.length ? (gTargets.reduce((a, b) => a + b, 0) / gTargets.length).toFixed(2) : '';
-    return `<div class="tm-group-block">
-      <div class="tm-group-title">${esc(g.name)}</div>
-      <table class="tm-table">
-        <thead><tr><th style="width:90px">组别</th><th>Name</th><th style="width:90px">个人目标</th><th style="width:110px">小小组完成率目标</th><th style="width:40px"></th></tr></thead>
-        <tbody>${rows.join('')}</tbody>
-        <tfoot><tr class="tm-tfoot"><td colspan="3">入职年限总目标</td><td>${gAvg ? gAvg + '%' : '—'}</td><td></td></tr></tfoot>
-      </table>
-    </div>`;
-  }).join('');
+      const gT = T.members.filter(m => m.groupId === g.id).map(m => parseFloat(mTarget(mk, m.id))).filter(n => !isNaN(n));
+      const avg = gT.length ? (gT.reduce((a, b) => a + b, 0) / gT.length).toFixed(2) : '';
+      return `<div class="tm-group-block">
+        <div class="tm-group-title">${esc(g.name)}</div>
+        <table class="tm-table">
+          <thead><tr><th style="width:90px">组别</th><th>Name</th><th style="width:90px">个人目标</th><th style="width:110px">小小组完成率目标</th><th style="width:40px"></th></tr></thead>
+          <tbody>${rows.join('')}</tbody>
+          <tfoot><tr class="tm-tfoot"><td colspan="3">入职年限总目标</td><td>${avg ? avg + '%' : '—'}</td><td></td></tr></tfoot>
+        </table>
+      </div>`;
+    }).join('');
+  };
 
   const legend = `<div class="tm-legend">
     ${allSubGroups.map((o, i) => `<span class="tm-lg"><i class="tm-dot tm-dot-${SG_COLORS[i % SG_COLORS.length]}"></i>${esc(o.sg.name)}</span>`).join('')}
   </div>`;
-  v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">目标可直接在表格里填写，改完点下方保存</span></div>
-  <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+
+  // 月份下拉的全部候选（本月 + 当前查看月 + 已存档月份 + 未来若干月）
+  const allMonthKeys = (act) => {
+    const s = new Set([thisM, act, ...Object.keys(T.months || {})]);
+    for (let i = 1; i <= 3; i++) s.add(monthKey(new Date(new Date().getFullYear(), new Date().getMonth() + i, 1)));
+    return [...s].sort().reverse();
+  };
+
+  // 其他月份（除当前查看月）→ 折叠卡片；默认收起（用户手动展开的状态在 state 里保留）
+  const histKeys = Object.keys(T.months || {}).filter(k => k !== activeM).sort().reverse();
+  const histBlocks = histKeys.map(k => {
+    const mo = T.months[k] || { targets: {}, collapsed: true };
+    if (mo.collapsed === undefined) mo.collapsed = true;
+    const open = !mo.collapsed;
+    const filled = Object.keys(mo.targets || {}).filter(id => mo.targets[id] !== '' && mo.targets[id] != null).length;
+    const isFuture = k > thisM;
+    return `<div class="tm-month-fold ${open ? 'open' : ''}">
+      <div class="tm-month-fold-head">
+        <span class="tm-fold-hit" data-act="team-month-toggle" data-mk="${k}">
+          <span class="tm-fold-arrow">${open ? '▾' : '▸'}</span>
+          <span class="tm-fold-name">${monthLabel(k)}${isFuture ? ' <span class="tm-fold-tag">未来</span>' : ''}</span>
+        </span>
+        <span class="tm-fold-meta">${filled} 人已填</span>
+        <button class="btn xs ghost" data-act="team-month-del" data-mk="${k}" title="删除该月记录">🗑</button>
+      </div>
+      ${open ? `<div class="tm-month-fold-body">${renderMonthTables(k)}
+        <div style="margin-top:10px"><button class="btn primary sm" data-act="team-save-member-targets" data-mk="${k}">💾 保存 ${monthLabel(k)} 目标</button></div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">目标按月存档，可直接在表格里填写</span></div>
+  <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button>
-    <button class="btn sm" data-act="team-save-member-targets">💾 保存所有目标</button>
+    <label class="tm-lb" style="margin-left:4px">月份</label>
+    <select class="field" id="tmMonthSel" style="width:150px">
+      ${allMonthKeys(activeM).map(k => `<option value="${k}" ${k === activeM ? 'selected' : ''}>${monthLabel(k)}${k === thisM ? '（本月）' : ''}</option>`).join('')}
+    </select>
+    <button class="btn sm" data-act="team-month-new">＋ 新建月份</button>
+    ${activeM !== thisM ? `<button class="btn sm ghost" data-act="team-month-goto" data-mk="${thisM}">回到本月</button>` : ''}
   </div>
   ${addForm}
   ${legend}
-  ${sections || '<div class="empty">暂无分组，请先在「目标设置」中配置</div>'}
+  ${renderMonthTables(activeM) || '<div class="empty">暂无分组，请先在「目标设置」中配置</div>'}
+  <div style="margin-top:12px"><button class="btn primary" data-act="team-save-member-targets" data-mk="${activeM}">💾 保存 ${monthLabel(activeM)} 目标</button></div>
+
+  ${histKeys.length ? `<div class="tm-hist-title">📁 其他月份（点击标题展开 / 收起，可查看也可修改）</div>
+  ${histBlocks}` : ''}
   </div>`;
+
+  // 月份下拉切换
+  const mSel = $('#tmMonthSel');
+  if (mSel) mSel.addEventListener('change', () => {
+    switchMonth(mSel.value);
+  });
 
   // 大组联动小小组（添加表单）
   if (showAdd) {
@@ -581,6 +679,23 @@ function renderTeamMembers(v) {
       });
     }
   }
+}
+
+/* ---- 新建月份弹窗 ---- */
+function openMonthPicker() {
+  const now = new Date();
+  const opts = [];
+  for (let i = -6; i <= 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const k = monthKey(d);
+    opts.push(`<option value="${k}">${monthLabel(k)}${k === monthKey() ? '（本月）' : ''}</option>`);
+  }
+  openModal(`<h3>新建 / 切换月份</h3>
+    <div class="row"><label>选择月份</label>
+      <select class="field" id="mpMonth" style="width:100%">${opts.join('')}</select>
+    </div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-top:6px">新建后该月目标为空表，可重新填写；已有月份会直接切换过去，不会清空数据。</div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" data-act="team-month-new-do">确定</button></div>`);
 }
 
 /* ---- 周数据录入 ---- */
@@ -1429,6 +1544,8 @@ $('#view').addEventListener('click', e => {
     const ntEl = $('#newMTarget');
     const nt = (ntEl ? (ntEl.value || '') : '').replace(/[^\d.]/g, '');
     state.team.members.push({ id: mid, name, personalTarget: nt, groupId: $('#newMGroup').value, subGroupId: $('#newMSGroup').value });
+    // 目标同时写入当前查看的月份
+    ensureMonth(curMonth()).targets[mid] = nt;
     const g = state.team.groups.find(x => x.id === $('#newMGroup').value);
     if (g) { const sg = g.subGroups.find(x => x.id === $('#newMSGroup').value); if (sg) sg.memberIds.push(mid); }
     state.team._showAddForm = false;
@@ -1447,16 +1564,44 @@ $('#view').addEventListener('click', e => {
     save(); renderTeam();
   }
   else if (act === 'team-save-member-targets') {
+    const mk = el.dataset.mk || curMonth();
+    const mo = ensureMonth(mk);
     let n = 0;
     $$('.tm-target-cell').forEach(input => {
+      if (input.dataset.mk && input.dataset.mk !== mk) return; // 只存该月的格子
       const mid = input.dataset.mid;
-      const m = state.team.members.find(x => x.id === mid);
-      if (!m) return;
-      m.personalTarget = (input.value || '').trim().replace(/[^\d.]/g, '');
+      if (!state.team.members.find(x => x.id === mid)) return;
+      mo.targets[mid] = (input.value || '').trim().replace(/[^\d.]/g, '');
       n++;
     });
     save(); renderTeam();
-    toast(`✅ 已保存 ${n} 位成员的目标`);
+    toast(`✅ 已保存 ${monthLabel(mk)} 的 ${n} 位成员目标`);
+  }
+  else if (act === 'team-month-toggle') {
+    const mk = el.dataset.mk;
+    const mo = ensureMonth(mk);
+    mo.collapsed = !mo.collapsed;
+    save(); renderTeam();
+  }
+  else if (act === 'team-month-del') {
+    const mk = el.dataset.mk;
+    if (!confirm(`确定删除「${monthLabel(mk)}」的目标记录？\n该月已填写的目标将被清空（成员本身不会删除）。`)) return;
+    delete state.team.months[mk];
+    if (state.team.currentMonth === mk) state.team.currentMonth = monthKey();
+    save(); renderTeam(); toast(`已删除 ${monthLabel(mk)} 的记录`);
+  }
+  else if (act === 'team-month-goto') {
+    switchMonth(el.dataset.mk);
+  }
+  else if (act === 'team-month-new') {
+    openMonthPicker();
+  }
+  else if (act === 'team-month-new-do') {
+    const sel = $('#mpMonth');
+    if (!sel) return;
+    closeModal();
+    switchMonth(sel.value);
+    toast(`已切换到 ${monthLabel(sel.value)}`);
   }
   else if (act === 'team-edit-member') {
     state.team._editMemberId = el.dataset.mid; save();
@@ -1701,6 +1846,14 @@ $('#modalRoot').addEventListener('click', e => {
     item.text = text; item.cat = cat; item.scope = sc;
     if (ndate !== odate) { item.date = ndate; arr.splice(idx, 1); (state.work.todos[ndate] = state.work.todos[ndate] || []).push(item); }
     save(); closeModal(); viewWork($('#view')); toast('已保存');
+  }
+  if (act === 'team-month-new-do') {
+    const sel = $('#mpMonth');
+    if (!sel) return;
+    closeModal();
+    switchMonth(sel.value);
+    toast(`已切换到 ${monthLabel(sel.value)}`);
+    return;
   }
   if (act === 'team-add-member-do') {
     const name = ($('#newMName').value || '').trim();
