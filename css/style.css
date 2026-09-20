@@ -526,7 +526,7 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 
 /* ---- 周数据：个人目标联动（可就地编辑，与成员管理同一份数据） ---- */
 .wk-tgt-wrap{display:inline-flex;align-items:center;gap:1px;justify-content:center}
-.wk-tgt-in{width:54px;text-align:center;font-family:var(--font);font-size:12.5px;font-weight:700;
+.wk-tgt-in{width:66px;text-align:center;font-family:var(--font);font-size:12.5px;font-weight:700;
   color:var(--ink);background:transparent;border:none;border-bottom:1px dashed var(--ink-faint);
   border-radius:0;padding:2px 1px;outline:none;transition:border-color .15s,background .15s}
 .wk-tgt-in:hover{border-bottom-color:var(--ink-soft)}
@@ -538,3 +538,11 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
   display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wk-warn .btn.xs{background:#fff;border:1px solid var(--yellow-300);color:#8A6320;padding:3px 9px;font-size:12px;border-radius:9px}
 .wk-warn .btn.xs:hover{background:var(--yellow-100)}
+
+/* ---- 周数据表格内输入框：紧凑内边距（默认 .field 的 11px/14px 会把数字挤掉） ---- */
+.wk-table .field{padding:5px 7px;border-radius:9px;font-size:12.5px;font-weight:700;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.wk-table .field::placeholder{font-weight:400}
+.wk-table .wk-rate{min-width:84px}
+.wk-table .wk-err{min-width:60px}
+.wk-table td{white-space:nowrap}
