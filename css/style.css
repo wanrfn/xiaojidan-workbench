@@ -546,3 +546,16 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .wk-table .wk-rate{min-width:84px}
 .wk-table .wk-err{min-width:60px}
 .wk-table td{white-space:nowrap}
+
+/* ---- 小小组完成率目标（= 组内成员个人目标均值） ---- */
+.tm-hint{margin:0 0 12px;padding:9px 12px;border-radius:10px;background:var(--green-50);
+  border:1px solid var(--green-100);color:var(--ink-soft);font-size:12.5px;line-height:1.65}
+.tm-sgavg{display:inline-block;font-weight:800;font-size:13px;letter-spacing:.2px;
+  font-variant-numeric:tabular-nums}
+.wk-sg-target{margin-left:14px;font-weight:600;font-size:11.5px}
+.wk-sg-avg{margin-left:12px;font-weight:600;font-size:11.5px}
+.wk-sg-target b,.wk-sg-avg b{font-weight:800;font-variant-numeric:tabular-nums}
+.wk-sg-avg i{font-style:normal;opacity:.75;font-size:11px;margin-left:1px}
+.tm-hint .btn.xs{background:#fff;border:1px solid var(--green-200);color:#3E7248;padding:3px 10px;
+  font-size:12px;border-radius:999px;margin-left:6px}
+.tm-hint .btn.xs:hover{background:var(--green-50)}
