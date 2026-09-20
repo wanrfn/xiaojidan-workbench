@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260920b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260920c'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1009,8 +1009,8 @@ function renderWeeklyForm(pk) {
       rows.push(`<tr class="wk-row ${color}">
         <td class="wk-mem">${esc(m.name)}</td>
         <td class="wk-tgt"><span class="wk-tgt-wrap"><input type="text" inputmode="decimal" class="wk-tgt-in" data-mid="${m.id}" data-mk="${mk}" value="${esc(ti.val)}" placeholder="未设" title="与「成员管理」的 ${esc(monthLabel(mk))} 目标联动，改完自动同步"> %<i class="wk-carry" style="display:${ti.carried && ti.val !== '' ? '' : 'none'}" title="该月未单独设置，沿用 ${esc(ti.from ? monthLabel(ti.from) : '历史数据')} 的目标">↩</i></span></td>
-        <td><input type="text" inputmode="decimal" class="field wk-rate" data-mid="${m.id}" value="${d.completionRate !== undefined && d.completionRate !== '' ? esc(d.completionRate) : ''}" placeholder="—" style="width:62px;text-align:center"> %</td>
-        <td><input type="text" inputmode="decimal" class="field wk-err" data-mid="${m.id}" value="${d.seriousErrors !== undefined && d.seriousErrors !== '' ? esc(d.seriousErrors) : ''}" placeholder="0" style="width:50px;text-align:center"></td>
+        <td><input type="text" inputmode="decimal" class="field wk-rate" data-mid="${m.id}" value="${d.completionRate !== undefined && d.completionRate !== '' ? esc(d.completionRate) : ''}" placeholder="—" style="width:84px;text-align:center"> %</td>
+        <td><input type="text" inputmode="decimal" class="field wk-err" data-mid="${m.id}" value="${d.seriousErrors !== undefined && d.seriousErrors !== '' ? esc(d.seriousErrors) : ''}" placeholder="0" style="width:60px;text-align:center"></td>
         <td class="wk-flag" data-flag="p-${m.id}">${flagBadge(rate == null || tgt == null ? null : personalHit)}</td>
         <td class="wk-flag" data-flag="s-${m.id}">${flagBadge(j.judged ? j.meet : null)}</td>
         <td class="wk-flag" data-flag="e-${m.id}">${flagBadge(errs === 0)}</td>
@@ -1026,7 +1026,7 @@ function renderWeeklyForm(pk) {
 
   box.innerHTML = `${warn}<div class="wk-scroll"><table class="team-table wk-table">
     <thead><tr>
-      <th style="min-width:120px">成员</th><th style="width:86px">个人目标</th><th style="width:110px">完成率</th><th style="width:74px">严错数</th>
+      <th style="min-width:120px">成员</th><th style="width:104px">个人目标</th><th style="width:142px">完成率</th><th style="width:90px">严错数</th>
       <th style="width:74px">个人达标</th><th style="width:82px">小小组达标</th><th style="width:64px">无严错</th><th style="width:74px">本周得分</th><th style="width:36px"></th>
     </tr></thead>
     <tbody>${rows.join('')}</tbody>
