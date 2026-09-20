@@ -445,3 +445,81 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
   .grid-3,.grid-4,.grid-2{grid-template-columns:1fr;}
   .topbar-title h1{font-size:19px;}
 }
+
+/* ============ 加减分规则分栏 ============ */
+.rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.rule-col{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+.rule-head{padding:9px 12px;font-weight:800;font-size:14px;letter-spacing:1px}
+.rh-plus{background:linear-gradient(135deg,#E8F5E9,#C8E6C9);color:#1B5E20}
+.rh-minus{background:linear-gradient(135deg,#FFEBEE,#FFCDD2);color:#B71C1C}
+.rule-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.rule-table td{padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.55}
+.rule-table tr:last-child td{border-bottom:none}
+.rule-table .tr-period td{background:#FFE082;font-weight:800;color:#5D4037;letter-spacing:.5px}
+.rule-table .tr-cat td{background:var(--green-50);font-weight:700;color:#2E7D32;font-size:12px}
+.rule-table .tr-name{width:100%}
+.rule-table .tr-pts{text-align:center;white-space:nowrap;font-weight:800;width:62px}
+.pts-plus{color:#2E7D32}
+.pts-minus{color:#C62828}
+.tr-auto{display:block;margin-top:2px;font-size:11px;color:#1565C0;font-weight:600}
+.rule-note{margin-top:14px;padding:11px 13px;border-radius:10px;background:var(--green-50);font-size:12.5px;line-height:1.75;color:var(--ink-soft)}
+@media (max-width:860px){.rule-grid{grid-template-columns:1fr}}
+
+/* ============ 周数据录入（日期区间 / 自动计分） ============ */
+.wk-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:12px;background:var(--card-soft);border:1px solid var(--line);border-radius:12px}
+.wk-tb-label{font-size:12.5px;font-weight:700;color:var(--ink-soft)}
+.wk-tb-sep{width:1px;height:22px;background:var(--line-strong);margin:0 4px}
+.wk-tb-tilde{color:var(--ink-faint)}
+.wk-scroll{overflow-x:auto}
+.wk-table th{white-space:nowrap}
+.wk-table .wk-sg-head td{padding:6px 10px;font-weight:800;font-size:12.5px;letter-spacing:.4px}
+.wk-sg-cnt{margin-left:8px;font-weight:600;opacity:.7;font-size:11.5px}
+.wk-sg-judge{margin-left:14px;font-weight:600;font-size:11.5px;opacity:.85}
+.wk-table .wk-mem{font-weight:700}
+.wk-tgt{text-align:center;color:var(--ink-soft)}
+.wk-na{color:var(--ink-faint);font-size:11.5px}
+.wk-flag{text-align:center}
+.wk-badge{display:inline-block;min-width:20px;padding:1px 5px;border-radius:7px;font-size:12px;font-weight:800}
+.wk-badge-yes{background:#E8F5E9;color:#2E7D32}
+.wk-badge-no{background:#FFEBEE;color:#C62828}
+.wk-badge-na{color:var(--ink-faint);background:transparent}
+.wk-score{text-align:center;font-weight:800;font-size:14px}
+.wk-more{font-weight:800;line-height:1;padding:3px 7px}
+.wk-more.on{background:var(--green-100,#DCEFE2)}
+.wk-tfoot td{padding:8px 10px;font-weight:800;font-size:13px;background:var(--card-soft);border-top:2px solid var(--line-strong)}
+.wk-tipbox{margin-top:10px;padding:9px 12px;border-radius:9px;background:var(--green-50);font-size:12px;line-height:1.7;color:var(--ink-soft)}
+.wk-empty{color:var(--ink-faint);font-size:12px;padding:8px 10px!important}
+
+/* 月度项展开面板 */
+.wk-detail td{padding:0!important;border-bottom:1px solid var(--line)}
+.wk-detail-box{padding:11px 13px;background:var(--card-soft)}
+.wk-detail-head{font-size:12.5px;font-weight:800;color:var(--ink-soft);margin-bottom:9px}
+.wk-mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:7px 12px}
+.wk-mi{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft)}
+.wk-mi>span{flex:1;min-width:64px;line-height:1.35}
+.wk-mi>em{font-style:normal;font-size:11px;color:var(--ink-faint);white-space:nowrap;min-width:26px}
+.wk-mi-chk{cursor:pointer}
+.wk-mi-chk input{margin:0;cursor:pointer}
+.wk-auto-line{margin-top:10px;padding-top:9px;border-top:1px dashed var(--line-strong);font-size:12px;color:var(--ink-soft);line-height:1.8}
+.wk-auto-tag{display:inline-block;margin-right:8px;padding:1px 7px;border-radius:7px;background:#E3F2FD;color:#1565C0;font-weight:800;font-size:11px}
+.wk-ok{color:#2E7D32}
+.wk-bad{color:#C62828}
+.wk-detail-total{margin-top:7px;font-size:12.5px;font-weight:700;color:var(--ink-soft)}
+
+/* 小小组配色：与「成员管理」一致的四色马卡龙 */
+.wk-table tr.wk-sg-head.tm-sg-a td,.team-table tr.wk-sg-head.tm-sg-a td{background:#FFD6E0;border-left:5px solid #FF9EB5;color:#8E3B52}
+.wk-table tr.wk-sg-head.tm-sg-b td,.team-table tr.wk-sg-head.tm-sg-b td{background:#D6F0FF;border-left:5px solid #7EC8F5;color:#1F5B7A}
+.wk-table tr.wk-sg-head.tm-sg-c td,.team-table tr.wk-sg-head.tm-sg-c td{background:#E0F7E9;border-left:5px solid #8DDCAE;color:#2A6B44}
+.wk-table tr.wk-sg-head.tm-sg-d td,.team-table tr.wk-sg-head.tm-sg-d td{background:#F0E2FF;border-left:5px solid #C4A0F0;color:#5B3B85}
+.wk-table tr.wk-row.tm-sg-a td,.team-table tr.wk-row.tm-sg-a td{background:#FFF9FB}
+.wk-table tr.wk-row.tm-sg-b td,.team-table tr.wk-row.tm-sg-b td{background:#F7FCFF}
+.wk-table tr.wk-row.tm-sg-c td,.team-table tr.wk-row.tm-sg-c td{background:#F7FEF9}
+.wk-table tr.wk-row.tm-sg-d td,.team-table tr.wk-row.tm-sg-d td{background:#FBF8FF}
+.wk-table tr.wk-row.tm-sg-a td.wk-mem{border-left:5px solid #FF9EB5}
+.wk-table tr.wk-row.tm-sg-b td.wk-mem{border-left:5px solid #7EC8F5}
+.wk-table tr.wk-row.tm-sg-c td.wk-mem{border-left:5px solid #8DDCAE}
+.wk-table tr.wk-row.tm-sg-d td.wk-mem{border-left:5px solid #C4A0F0}
+.wk-table tr.wk-row.tm-sg-a td.wk-score{background:#FFF1F5}
+.wk-table tr.wk-row.tm-sg-b td.wk-score{background:#EFF9FF}
+.wk-table tr.wk-row.tm-sg-c td.wk-score{background:#EFFBF4}
+.wk-table tr.wk-row.tm-sg-d td.wk-score{background:#F7F0FF}
