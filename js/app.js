@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260918c'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260920a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -226,7 +226,9 @@ function seed() {
       members: [],
       months: {},          // { '2026-09': { targets: {mid: '125'}, collapsed: false } }
       currentMonth: '',    // 当前查看的月份 'YYYY-MM'，空 = 自动取当月
-      weeks: {}
+      weeks: {},           // { '2026-09-14': { start:'2026-09-14', end:'2026-09-20', data:{mid:{completionRate,seriousErrors}} } }
+      monthExtras: {},     // { '2026-09': { mid: { 月度加分/扣分项 } } }
+      _selectedPeriod: ''  // 当前查看的日期区间 key
     },
     settings: { sync: { mode: 'local', url: '', enabled: false, cloudId: '', cloudUrl: '', cloudKey: '' } },
   };
@@ -254,7 +256,10 @@ function load() {
 let state = load();
 // 老数据迁移：把成员身上的 personalTarget 归入 2026-09，并初始化当前月份
 migrateTeamMonths();
+normalizeWeeks();   // 旧的 'YYYY-Www' 周记录补上 start / end
 if (!state.team.currentMonth) state.team.currentMonth = monthKey();
+if (!state.team.monthExtras) state.team.monthExtras = {};
+if (!state.team._selectedPeriod) state.team._selectedPeriod = periodList()[0] || '';
 let _pushTimer = null, _lastPush = 0, _syncing = false;
 function save(silent) {
   localStorage.setItem(KEY, JSON.stringify(state));
@@ -455,6 +460,70 @@ function todoRow(tk) {
 }
 
 /* =================== 小组目标管理 =================== */
+// 小小组 → 马卡龙配色的全局映射（成员管理 / 周数据录入共用同一套颜色）
+const SG_COLOR_KEYS = ['a', 'b', 'c', 'd'];
+function sgColorMap() {
+  const map = {};
+  let i = 0;
+  (state.team.groups || []).forEach(g => (g.subGroups || []).forEach(sg => {
+    map[sg.id] = 'tm-sg-' + SG_COLOR_KEYS[i % SG_COLOR_KEYS.length];
+    i++;
+  }));
+  return map;
+}
+// 扁平化的小小组列表，保持「大组 → 小小组」顺序
+function allSubGroupList() {
+  return (state.team.groups || []).reduce((acc, g) => acc.concat((g.subGroups || []).map(sg => ({ g, sg }))), []);
+}
+
+/* ---- 加减分规则（唯一数据源：规则页展示 + 自动算分都读它） ---- */
+const TEAM_RULES = {
+  plus: [
+    { period: '每周', cat: '业务数据', items: [
+      { key: 'bonusPersonalGoal', name: '个人完成率目标', pts: 1, auto: '完成率 ≥ 个人目标' },
+      { key: 'bonusSubGroupGoal', name: '小小组完成率达标（小组）', pts: 1, auto: '小小组全员达标' },
+      { key: 'bonusNoErrorWeek', name: '个人本周无严错产生', pts: 1, auto: '严错数 = 0' }
+    ]},
+    { period: '每月', cat: '业务数据', items: [
+      { key: 'monthAttendTop1', name: '应出勤组内 Top 1', pts: 3 },
+      { key: 'monthAttendTop2', name: '应出勤组内 Top 2', pts: 2 },
+      { key: 'monthAttendTop3', name: '应出勤组内 Top 3', pts: 1 },
+      { key: 'bonusNoErrorMonth', name: '无严错', pts: 2 }
+    ]},
+    { period: '每月', cat: '小组活动', items: [
+      { key: 'bonusActivity', name: '组织技能分享 / 座谈会等组内线下活动', pts: 3 },
+      { key: 'bonusInitiative', name: '主动接收临时紧急任务 / 主动补位 / 主动提建设性建议', pts: 2 },
+      { key: 'bonusOnlineShare', name: '线上 case 分享 / tips 分享 / 疑难问题攻坚…', pts: 1 },
+      { key: 'bonusEventOwner', name: '“周内大事件”负责人', pts: 2 },
+      { key: 'bonusTea', name: '组织下午茶', pts: 1 }
+    ]},
+    { period: '每月', cat: '组会', items: [
+      { key: 'bonusQuiz', name: '小组答题（小组）', pts: 1 }
+    ]},
+    { period: '每月', cat: '科室', items: [
+      { key: 'bonusTrainer', name: '科室培训讲师', pts: 3 },
+      { key: 'bonusDeptOther', name: '科室其他活动', pts: '1~3' }
+    ]}
+  ],
+  minus: [
+    { period: '每周', cat: '个人', items: [
+      { key: 'deductSeriousErr', name: '每产生 1 个严错', pts: 0.5, auto: '严错数 × 0.5' }
+    ]},
+    { period: '每月', cat: '个人', items: [
+      { key: 'deductErrorsGte3', name: '严错 ≥ 3 个', pts: 2, auto: '严错数 ≥ 3' },
+      { key: 'deductQualityRule', name: '触及当月质量目标具体条例（如 compare、图表解释问题等）', pts: 1 },
+      { key: 'deductDragGroup', name: '完成率低于小组目标且导致小组不达标（部分成员达标）', pts: 2 },
+      { key: 'deductPending', name: '违规 pending / 返稿 / 跳 QC…', pts: 0.5 },
+      { key: 'deductLow', name: 'Low 等级违规（未送美修 / 稿件 delay 48h / 宣传文件 / 多次违规修改稿件状态导致严重后果等）', pts: 1 },
+      { key: 'deductMed', name: 'Medium 等级违规', pts: 2 },
+      { key: 'deductHigh', name: 'High 等级违规', pts: 3 }
+    ]},
+    { period: '每月', cat: '小小组', items: [
+      { key: 'deductGroupAllFail', name: '小小组成员完成率均不达标', pts: 2, auto: '小小组全员不达标' }
+    ]}
+  ]
+};
+
 // 统一重渲染入口：始终渲染到最外层 #workPanel，避免把 team 视图套进 #teamPanel 造成层级错乱
 function renderTeam() {
   const panel = $('#workPanel');
@@ -467,6 +536,7 @@ function viewTeamGoals(v) {
   <div class="team-tabs" style="margin-bottom:16px">
     <button class="team-tab ${tab==='goals'?'on':''}" data-act="team-tab" data-ttab="goals">🎯 目标设置</button>
     <button class="team-tab ${tab==='members'?'on':''}" data-act="team-tab" data-ttab="members">👥 成员管理</button>
+    <button class="team-tab ${tab==='rules'?'on':''}" data-act="team-tab" data-ttab="rules">📐 加减分规则</button>
     <button class="team-tab ${tab==='weekly'?'on':''}" data-act="team-tab" data-ttab="weekly">📝 周数据录入</button>
     <button class="team-tab ${tab==='scoreboard'?'on':''}" data-act="team-tab" data-ttab="scoreboard">🏆 积分看板</button>
   </div>
@@ -474,8 +544,50 @@ function viewTeamGoals(v) {
   const p = $('#teamPanel');
   if (tab === 'goals') renderTeamGoals(p);
   else if (tab === 'members') renderTeamMembers(p);
+  else if (tab === 'rules') renderTeamRules(p);
   else if (tab === 'weekly') renderTeamWeekly(p);
   else renderTeamScoreboard(p);
+}
+
+/* ---- 加减分规则分栏 ---- */
+function renderTeamRules(v) {
+  const ruleTable = (side) => {
+    const isPlus = side === 'plus';
+    const groups = TEAM_RULES[side];
+    // 按「每周 / 每月」分段，保留各段的分类小标题
+    const periods = [];
+    groups.forEach(gr => {
+      let p = periods.find(x => x.period === gr.period);
+      if (!p) { p = { period: gr.period, cats: [] }; periods.push(p); }
+      p.cats.push(gr);
+    });
+    const body = periods.map(pd => `
+      <tr class="tr-period"><td colspan="2">${pd.period}</td></tr>
+      ${pd.cats.map(c => `
+        <tr class="tr-cat"><td colspan="2">${esc(c.cat)}</td></tr>
+        ${c.items.map(it => `<tr>
+          <td class="tr-name">${esc(it.name)}${it.auto ? `<span class="tr-auto">自动：${esc(it.auto)}</span>` : ''}</td>
+          <td class="tr-pts ${isPlus ? 'pts-plus' : 'pts-minus'}">${isPlus ? '+' : '-'}${it.pts}</td>
+        </tr>`).join('')}
+      `).join('')}
+    `).join('');
+    return `<div class="rule-col ${isPlus ? 'rule-col-plus' : 'rule-col-minus'}">
+      <div class="rule-head ${isPlus ? 'rh-plus' : 'rh-minus'}">${isPlus ? '加分' : '扣分'}</div>
+      <table class="rule-table"><tbody>${body}</tbody></table>
+    </div>`;
+  };
+
+  v.innerHTML = `<div class="card">
+    <div class="card-head"><h2>📐 加减分规则</h2><span class="ch-sub">周数据录入的得分按此规则自动计算</span></div>
+    <div class="rule-grid">${ruleTable('plus')}${ruleTable('minus')}</div>
+    <div class="rule-note">
+      <b>自动计分说明：</b>「周数据录入」里只需填写 <b>完成率</b> 与 <b>严错数</b>，
+      系统会据此自动判定 <b>个人完成率目标</b>（完成率 ≥ 个人目标 +1）、
+      <b>小小组完成率达标</b>（小小组全员达标 +1）、
+      <b>无严错</b>（严错数 = 0 时 +1，否则每个严错 -0.5），并即时给出本周得分。<br>
+      标注「每月」的项按月统计，在成员行内展开「更多」后填写；每月积分 Top 3 有额外惊喜～
+    </div>
+  </div>`;
 }
 
 /* ---- 目标设置 ---- */
@@ -698,206 +810,384 @@ function openMonthPicker() {
     <div class="row" style="margin-top:14px"><button class="btn primary" data-act="team-month-new-do">确定</button></div>`);
 }
 
-/* ---- 周数据录入 ---- */
-function getWeekKey(dateStr) { const d = new Date(dateStr); const jan1 = new Date(d.getFullYear(),0,1); const days = Math.floor((d - jan1)/(86400000)); const w = Math.ceil((days + jan1.getDay()+1)/7); return `${d.getFullYear()}-W${String(w).padStart(2,'0')}`; }
-function getWeeksInMonth(year, month) { const weeks = []; Object.keys(state.team.weeks || {}).forEach(k => { const m = k.match(/^(\d{4})-W(\d{2})$/); if (!m) return; const d = new Date(year, month, 1); const jan1 = new Date(year,0,1); const targetWeek = Math.ceil((1 + jan1.getDay())/7); const wNum = parseInt(m[2]); /* simple: include if year matches and week is in range */ if (parseInt(m[1]) === year) weeks.push(k); }); return weeks.sort().reverse(); }
+/* ---- 周数据录入（日期区间 + 极简录入 + 按规则自动算分） ---- */
+// 周记录 key = 起始日期 'YYYY-MM-DD'
+function getWeekKey(dateStr) { const d = new Date(dateStr); const jan1 = new Date(d.getFullYear(), 0, 1); const days = Math.floor((d - jan1) / 86400000); const w = Math.ceil((days + jan1.getDay() + 1) / 7); return `${d.getFullYear()}-W${String(w).padStart(2, '0')}`; }
+function periodList() { return Object.keys(state.team.weeks || {}).sort().reverse(); }
+function weekLabel(w) { return w && w.start ? `${w.start} ~ ${w.end || w.start}` : ''; }
+function monthOfPeriod(w) { return w && w.start ? w.start.slice(0, 7) : ''; }
+function periodsInMonth(mk) { return periodList().filter(k => monthOfPeriod(state.team.weeks[k]) === mk).sort(); }
+function mondayStr(d) { const x = d ? new Date(d) : new Date(); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return dateStrOf(x); }
+function sundayStr(d) { const x = new Date(mondayStr(d)); x.setDate(x.getDate() + 6); return dateStrOf(x); }
+function dateStrOf(x) { return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; }
+function shiftDate(s, n) { const d = new Date(s); d.setDate(d.getDate() + n); return dateStrOf(d); }
+// 兼容旧数据：把 '2026-W38' 形式的记录补上 start / end
+function normalizeWeeks() {
+  const T = state.team; if (!T.weeks) T.weeks = {};
+  let changed = false;
+  Object.keys(T.weeks).forEach(k => {
+    const w = T.weeks[k]; if (!w) return;
+    if (!w.start) { w.start = w.weekDate || todayStr(); changed = true; }
+    if (!w.end) { w.end = shiftDate(w.start, 6); changed = true; }
+    if (!w.data) { w.data = {}; changed = true; }
+  });
+  return changed;
+}
+
+// 该成员在指定月份的个人目标（数值，未设置为 null）
+function memberTarget(mid, mk) { const n = parseFloat(mTarget(mk || curMonth(), mid)); return isNaN(n) ? null : n; }
+// 小小组达标判定：全员达标 meet / 全员不达标 allFail
+function subGroupMeet(sgId, mk, rateMap) {
+  const ms = state.team.members.filter(m => m.subGroupId === sgId);
+  if (!ms.length) return { meet: false, allFail: false, judged: false };
+  let meet = true, fail = true, judged = false;
+  ms.forEach(m => {
+    const t = memberTarget(m.id, mk);
+    const r = rateMap[m.id];
+    if (t == null || r == null || isNaN(r)) return;
+    judged = true;
+    if (r >= t) fail = false; else meet = false;
+  });
+  return { meet: judged && meet, allFail: judged && fail, judged };
+}
+// 本周得分（只含「每周」规则项）
+function calcWeekScore(personalHit, subHit, errs) {
+  let s = 0;
+  if (personalHit) s += 1;   // 个人完成率目标 +1
+  if (subHit) s += 1;        // 小小组完成率达标 +1
+  if (!errs) s += 1;         // 个人本周无严错 +1
+  s -= errs * 0.5;           // 每产生 1 个严错 -0.5
+  return Math.round(s * 10) / 10;
+}
+// 月度加分/扣分项存储
+function monthExtras(mk, mid) {
+  const T = state.team;
+  if (!T.monthExtras) T.monthExtras = {};
+  if (!T.monthExtras[mk]) T.monthExtras[mk] = {};
+  if (!T.monthExtras[mk][mid]) T.monthExtras[mk][mid] = {};
+  return T.monthExtras[mk][mid];
+}
+// 该月某成员的严错合计
+function monthErrSum(mk, mid) {
+  return periodsInMonth(mk).reduce((a, k) => a + (parseInt((((state.team.weeks[k] || {}).data || {})[mid] || {}).seriousErrors) || 0), 0);
+}
+// 该月是否已有任何一周数据
+function hasWeekData(mk, mid) {
+  return periodsInMonth(mk).some(k => { const d = (((state.team.weeks[k] || {}).data || {})[mid] || {}); return d.completionRate !== undefined && d.completionRate !== ''; });
+}
+// 该月最新一周的完成率映射
+function latestRateMap(mk) {
+  const ks = periodsInMonth(mk); const last = ks[ks.length - 1]; const map = {};
+  if (!last) return map;
+  const data = (state.team.weeks[last] || {}).data || {};
+  state.team.members.forEach(m => { const r = parseFloat((data[m.id] || {}).completionRate); map[m.id] = isNaN(r) ? null : r; });
+  return map;
+}
+// 该成员该月的「每月」规则得分
+function calcMonthExtra(member, mk) { return calcMonthExtraFrom(monthExtras(mk, member.id), member, mk); }
+// 纯函数：给定月度项数据算分（便于输入时实时预览）
+function calcMonthExtraFrom(x, member, mk) {
+  x = x || {};
+  const errSum = monthErrSum(mk, member.id);
+  let s = 0;
+  // ---- 加分 ----
+  const rank = parseInt(x.attendanceRank);
+  if (rank === 1) s += 3; else if (rank === 2) s += 2; else if (rank === 3) s += 1;
+  if (errSum === 0 && hasWeekData(mk, member.id)) s += 2;      // 无严错
+  s += (parseInt(x.bonusActivity) || 0) * 3;                   // 组织活动 ×3
+  s += (parseInt(x.bonusInitiative) || 0) * 2;                 // 主动补位 ×2
+  s += (parseInt(x.bonusOnlineShare) || 0) * 1;                // 线上分享 ×1
+  s += (parseInt(x.bonusEventOwner) || 0) * 2;                 // 周内大事件 ×2
+  s += (parseInt(x.bonusTea) || 0) * 1;                        // 下午茶 ×1
+  s += (parseInt(x.bonusQuiz) || 0) * 1;                       // 小组答题 ×1
+  s += (parseInt(x.bonusTrainer) || 0) * 3;                    // 科室讲师 ×3
+  s += (parseFloat(x.bonusDeptOther) || 0);                    // 科室其他活动 1~3，直接填分值
+  // ---- 扣分 ----
+  if (errSum >= 3) s -= 2;                                     // 严错≥3
+  if (x.deductQualityRule) s -= 1;                             // 触及质量条例
+  if (x.deductDragGroup) s -= 2;                               // 完成率低致小组不达标
+  s -= (parseFloat(x.deductPending) || 0) * 0.5;               // pending/返稿/跳QC
+  s -= (parseFloat(x.deductLow) || 0) * 1;                     // Low 违规
+  s -= (parseFloat(x.deductMed) || 0) * 2;                     // Medium 违规
+  s -= (parseFloat(x.deductHigh) || 0) * 3;                    // High 违规
+  const sj = subGroupMeet(member.subGroupId, mk, latestRateMap(mk));
+  if (sj.allFail) s -= 2;                                      // 小小组成员完成率均不达标
+  return Math.round(s * 10) / 10;
+}
+// 某成员某周的得分（周项）
+function weekScoreOf(pk, mid) {
+  const T = state.team; const wk = T.weeks[pk]; if (!wk) return 0;
+  const mk = monthOfPeriod(wk) || curMonth();
+  const m = T.members.find(x => x.id === mid); if (!m) return 0;
+  const d = (wk.data || {})[mid] || {};
+  const rate = parseFloat(d.completionRate); const tgt = memberTarget(mid, mk);
+  const personalHit = (!isNaN(rate) && tgt != null) ? rate >= tgt : false;
+  const rateMap = {};
+  T.members.forEach(x => { const r = parseFloat(((wk.data || {})[x.id] || {}).completionRate); rateMap[x.id] = isNaN(r) ? null : r; });
+  const sj = subGroupMeet(m.subGroupId, mk, rateMap);
+  return calcWeekScore(personalHit, sj.meet, parseInt(d.seriousErrors) || 0);
+}
+function flagBadge(v) { return v === null ? '<span class="wk-badge wk-badge-na">—</span>' : v ? '<span class="wk-badge wk-badge-yes">✓</span>' : '<span class="wk-badge wk-badge-no">✕</span>'; }
 
 function renderTeamWeekly(v) {
   const T = state.team;
-  const now = new Date();
-  const curWeek = getWeekKey(todayStr());
-  const weekKeys = Object.keys(T.weeks || {}).sort().reverse();
-  const selectedWeek = T._selectedWeek || curWeek;
-
-  v.innerHTML = `<div class="card"><div class="card-head"><h2>📝 周数据录入</h2>
-    <span class="ch-sub">
-      选择周: <select class="field" id="weekSelect" style="width:160px">
-        <option value="">+ 新建一周</option>
-        ${weekKeys.map(wk => `<option value="${wk}" ${wk===selectedWeek?'selected':''}>${wk}${wk===curWeek?' (本周)':''}</option>`).join('')}
+  const list = periodList();
+  const sel = (T._selectedPeriod && T.weeks[T._selectedPeriod]) ? T._selectedPeriod : (list[0] || '');
+  T._selectedPeriod = sel;
+  v.innerHTML = `<div class="card">
+    <div class="card-head"><h2>📝 周数据录入</h2><span class="ch-sub">只需填写完成率与严错数，得分自动按规则计算</span></div>
+    <div class="wk-toolbar">
+      <span class="wk-tb-label">日期区间</span>
+      <select class="field" id="wkPeriodSel" style="min-width:200px">
+        ${list.length ? list.map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(weekLabel(T.weeks[k]))}</option>`).join('') : '<option value="">（暂无区间）</option>'}
       </select>
-      ${selectedWeek && !T.weeks[selectedWeek] ? '' : selectedWeek ? `<span style="margin-left:8px;font-size:12px;color:var(--ink-soft)">日期: ${(T.weeks[selectedWeek]||{}).weekDate||''}</span>` : ''}
-    </span>
-  </div>
-  <div id="weeklyForm"></div>
+      <span class="wk-tb-sep"></span>
+      <input type="date" class="field" id="wkNewStart" value="${mondayStr()}" title="起始日期">
+      <span class="wk-tb-tilde">~</span>
+      <input type="date" class="field" id="wkNewEnd" value="${sundayStr()}" title="结束日期">
+      <button class="btn primary sm" data-act="team-create-period">＋ 创建区间</button>
+      ${sel ? `<button class="btn sm ghost" data-act="team-del-period" data-k="${sel}" style="color:var(--danger);margin-left:auto">🗑 删除该区间</button>` : ''}
+    </div>
+    <div class="tm-legend">${allSubGroupList().map((o, i) => `<span class="tm-lg"><i class="tm-dot tm-dot-${SG_COLOR_KEYS[i % SG_COLOR_KEYS.length]}"></i>${esc(o.sg.name)}</span>`).join('')}</div>
+    <div id="weeklyForm"></div>
   </div>`;
-
-  renderWeeklyForm(selectedWeek);
+  renderWeeklyForm(sel);
 }
-function renderWeeklyForm(weekKey) {
+
+function renderWeeklyForm(pk) {
   const T = state.team;
-  const form = $('#weeklyForm');
-  if (!weekKey || !T.weeks[weekKey]) {
-    form.innerHTML = `<div style="padding:20px;text-align:center">
-      <p style="color:var(--ink-soft);margin-bottom:12px">选择已有周或新建一周来录入数据</p>
-      <div class="row"><label>该周起始日期</label><input type="date" class="field" id="newWeekDate" value="${todayStr()}"></div>
-      <div class="row"><button class="btn primary" data-act="team-create-week">创建新周</button></div>
-    </div>`;
-    return;
-  }
-  const wk = T.weeks[weekKey];
-  const members = T.members;
+  const box = $('#weeklyForm'); if (!box) return;
+  if (!pk || !T.weeks[pk]) { box.innerHTML = `<div class="empty">还没有任何日期区间。填好上方起止日期后点「＋ 创建区间」开始录入。</div>`; return; }
+  if (!T.members.length) { box.innerHTML = '<div class="empty">请先在「成员管理」中添加成员</div>'; return; }
 
-  if (members.length === 0) { form.innerHTML = '<div class="empty">请先在「成员管理」中添加成员</div>'; return; }
+  const wk = T.weeks[pk];
+  const mk = monthOfPeriod(wk) || curMonth();
+  const cmap = sgColorMap();
+  const rateMap = {};
+  T.members.forEach(m => { const r = parseFloat((((wk.data || {})[m.id]) || {}).completionRate); rateMap[m.id] = isNaN(r) ? null : r; });
 
-  form.innerHTML = `
-  <div style="overflow-x:auto">
-  <table class="team-table">
+  const rows = [];
+  allSubGroupList().forEach(({ sg }) => {
+    const color = cmap[sg.id] || 'tm-sg-a';
+    const mems = T.members.filter(m => m.subGroupId === sg.id);
+    const j = subGroupMeet(sg.id, mk, rateMap);
+    rows.push(`<tr class="wk-sg-head ${color}"><td colspan="9">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span>
+      <span class="wk-sg-judge">小小组达标：${flagBadge(j.judged ? j.meet : null)}</span></td></tr>`);
+    if (!mems.length) { rows.push(`<tr class="wk-row ${color}"><td class="wk-empty" colspan="9">暂无成员</td></tr>`); return; }
+    mems.forEach(m => {
+      const d = (wk.data || {})[m.id] || {};
+      const rate = rateMap[m.id];
+      const tgt = memberTarget(m.id, mk);
+      const errs = parseInt(d.seriousErrors) || 0;
+      const personalHit = (rate != null && tgt != null) ? rate >= tgt : false;
+      const score = calcWeekScore(personalHit, j.meet, errs);
+      rows.push(`<tr class="wk-row ${color}">
+        <td class="wk-mem">${esc(m.name)}</td>
+        <td class="wk-tgt">${tgt != null ? tgt + '%' : '<span class="wk-na">未设目标</span>'}</td>
+        <td><input type="text" inputmode="decimal" class="field wk-rate" data-mid="${m.id}" value="${d.completionRate !== undefined && d.completionRate !== '' ? esc(d.completionRate) : ''}" placeholder="—" style="width:62px;text-align:center"> %</td>
+        <td><input type="text" inputmode="decimal" class="field wk-err" data-mid="${m.id}" value="${d.seriousErrors !== undefined && d.seriousErrors !== '' ? esc(d.seriousErrors) : ''}" placeholder="0" style="width:50px;text-align:center"></td>
+        <td class="wk-flag" data-flag="p-${m.id}">${flagBadge(rate == null || tgt == null ? null : personalHit)}</td>
+        <td class="wk-flag" data-flag="s-${m.id}">${flagBadge(j.judged ? j.meet : null)}</td>
+        <td class="wk-flag" data-flag="e-${m.id}">${flagBadge(errs === 0)}</td>
+        <td class="wk-score ${score >= 0 ? 'score-pos' : 'score-neg'}" data-score="${m.id}"><b>${score}</b></td>
+        <td><button class="btn sm ghost wk-more ${(T._openDetails || {})[m.id] ? 'on' : ''}" data-act="wk-toggle-more" data-mid="${m.id}" title="展开本月加分/扣分项">⋯</button></td>
+      </tr>`);
+      rows.push(`<tr class="wk-detail" data-detail="${m.id}" style="display:${(T._openDetails || {})[m.id] ? '' : 'none'}"><td colspan="9">${monthlyDetailHtml(m, mk)}</td></tr>`);
+    });
+  });
+
+  box.innerHTML = `<div class="wk-scroll"><table class="team-table wk-table">
     <thead><tr>
-      <th>成员</th><th>所属小组</th><th>完成率%</th><th>严错数</th><th>无差错周</th>
-      <th>个人达标</th><th>小小组达标</th><th>应出勤排名</th>
-      <th>pending/误稿</th><th>Low违规</th><th>Med违规</th><th>High违规</th>
-      <th>活动(×3)</th><th>主动补位(×2)</th><th>线上分享(×1)</th>
-      <th>大事件(×2)</th><th>茶水(×1)</th><th>答题(×1)</th><th>讲师(×3)</th><th>其他推动</th>
-      <th>触及质量条例</th><th>拖累小组</th><th>严错≥3</th><th>全员不达标</th>
-      <th>周积分</th>
+      <th style="min-width:120px">成员</th><th style="width:74px">个人目标</th><th style="width:110px">完成率</th><th style="width:74px">严错数</th>
+      <th style="width:74px">个人达标</th><th style="width:82px">小小组达标</th><th style="width:64px">无严错</th><th style="width:74px">本周得分</th><th style="width:36px"></th>
     </tr></thead>
-    <tbody>
-      ${members.map(m => {
-        const d = (wk.data || {})[m.id] || {};
-        const score = calcMemberWeekScore(m, d, wk, weekKey);
-        const g = T.groups.find(gr => gr.id === m.groupId);
-        const sg = g ? g.subGroups.find(s => s.id === m.subGroupId) : null;
-        return `<tr>
-          <td><b>${esc(m.name)}</b></td>
-          <td><span class="pill scope-${sg?((['组内','科室','部门','外部'])[T.groups.indexOf(g)]||'其他'):'其他'}" style="font-size:11px">${sg?sg.name:'-'}</span></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="completionRate" value="${d.completionRate!==undefined?d.completionRate:''}" style="width:60px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="seriousErrors" value="${d.seriousErrors||0}" style="width:50px"></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusNoErrorWeek" ${d.bonusNoErrorWeek?'checked':''}></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusPersonalGoal" ${d.bonusPersonalGoal?'checked':''}></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="bonusSubGroupGoal" ${d.bonusSubGroupGoal?'checked':''}></td>
-          <td><select class="field team-cell" data-mid="${m.id}" data-fld="attendanceRank" style="width:65px">
-            <option value="" ${!d.attendanceRank?'selected':''}>-</option>
-            ${[1,2,3].map(n=>`<option value="${n}" ${d.attendanceRank==n?'selected':''}>Top${n}</option>`).join('')}
-            <option value="0" ${d.attendanceRank===0?'selected':''}>其他</option>
-          </select></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="pendingCount" value="${d.pendingCount||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="lowViolations" value="${d.lowViolations||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="medViolations" value="${d.medViolations||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="highViolations" value="${d.highViolations||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusActivity" value="${d.bonusActivity||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusInitiative" value="${d.bonusInitiative||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusOnlineShare" value="${d.bonusOnlineShare||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusEventOwner" value="${d.bonusEventOwner||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusTea" value="${d.bonusTea||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusQuiz" value="${d.bonusQuiz||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusTrainer" value="${d.bonusTrainer||0}" style="width:50px"></td>
-          <td><input type="number" class="field team-cell" data-mid="${m.id}" data-fld="bonusOtherPush" value="${d.bonusOtherPush||0}" style="width:55px" placeholder="1~3每项"></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductQualityRule" ${d.deductQualityRule?'checked':''}></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductDragGroup" ${d.deductDragGroup?'checked':''}></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductErrorsGte3" ${d.deductErrorsGte3?'checked':''}></td>
-          <td><input type="checkbox" class="team-cell" data-mid="${m.id}" data-fld="deductGroupAllFail" ${d.deductGroupAllFail?'checked':''}></td>
-          <td class="team-score-cell ${score>=0?'score-pos':'score-neg'}"><b>${score}</b></td>
-        </tr>`;
-      }).join('')}
-    </tbody>
-  </table>
-  </div>
+    <tbody>${rows.join('')}</tbody>
+    <tfoot><tr class="wk-tfoot">
+      <td colspan="3">本周合计（${esc(weekLabel(wk))}）</td>
+      <td colspan="4" style="text-align:right">全员本周得分合计</td>
+      <td class="wk-score score-pos" id="wkTotalCell"><b>${T.members.reduce((a, m) => a + weekScoreOf(pk, m.id), 0).toFixed(1)}</b></td>
+      <td></td>
+    </tr></tfoot>
+  </table></div>
+  <div class="wk-tipbox">💡 「个人达标 / 小小组达标 / 无严错」由系统按 <b>加减分规则</b> 自动判定，本周得分 = 达标项加分 − 严错扣分；每月项目点行末 <b>⋯</b> 展开填写。</div>
   <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn primary" data-act="team-save-week" data-week="${weekKey}">💾 保存本周数据</button>
-    <button class="btn yellow sm" data-act="team-show-rules" data-week="${weekKey}>📋 查看积分规则</button>
+    <button class="btn primary" data-act="team-save-period" data-k="${pk}">💾 保存本周数据</button>
+    <button class="btn yellow sm" data-act="team-show-rules">📋 查看加减分规则</button>
   </div>`;
 }
 
-/* ---- 积分核算引擎 ---- */
-function calcMemberWeekScore(member, d, wk, weekKey) {
-  let score = 0;
-  // 每周加分
-  if (d.bonusNoErrorWeek) score += 1;           // 个人本周无差错
-  if (d.bonusPersonalGoal) score += 1;          // 个人完成率目标
-  if (d.bonusSubGroupGoal) score += 1;         // 小小组完成率达标
-  // 每月加分（按周录入，月度汇总时统计）
-  // 应出勤排名
-  if (d.attendanceRank === 1) score += 3;
-  else if (d.attendanceRank === 2) score += 2;
-  else if (d.attendanceRank === 3) score += 1;
-  // 无严错
-  const errCount = parseInt(d.seriousErrors) || 0;
-  if (errCount === 0) score += 2;
-  // 其他加分
-  score += (parseInt(d.bonusActivity)||0) * 3;       // 组织活动 ×3
-  score += (parseInt(d.bonusInitiative)||0) * 2;     // 主动补位 ×2
-  score += (parseInt(d.bonusOnlineShare)||0) * 1;     // 线上分享 ×1
-  score += (parseInt(d.bonusEventOwner)||0) * 2;      // 大事件负责人 ×2
-  score += (parseInt(d.bonusTea)||0) * 1;             // 茶水 ×1
-  score += (parseInt(d.bonusQuiz)||0) * 1;            // 答题 ×1
-  score += (parseInt(d.bonusTrainer)||0) * 3;         // 讲师 ×3
-  score += (parseInt(d.bonusOtherPush)||0);           // 其他推动
-
-  // 扣分：每人每周
-  score -= errCount * 0.5;                            // 每个严错 -0.5
-  score -= (parseInt(d.pendingCount)||0) * 0.5;       // pending/误稿 -0.5 each
-  // 扣分：每月
-  if (d.deductErrorsGte3) score -= 2;                // 严错≥3个
-  if (d.deductQualityRule) score -= 1;               // 触及质量条例
-  if (d.deductDragGroup) score -= 2;                 // 拖累小组
-  score -= (parseInt(d.lowViolations)||0) * 1;       // Low违规
-  score -= (parseInt(d.medViolations)||0) * 1;       // Medium违规
-  score -= (parseInt(d.highViolations)||0) * 3;      // High违规
-  if (d.deductGroupAllFail) score -= 2;              // 全员不达标
-
-  return Math.round(score * 10) / 10;
+// 月度加分/扣分项展开面板
+function monthlyDetailHtml(m, mk) {
+  const x = monthExtras(mk, m.id);
+  const errSum = monthErrSum(mk, m.id);
+  const sj = subGroupMeet(m.subGroupId, mk, latestRateMap(mk));
+  const num = (k, label, mult) => `<label class="wk-mi"><span>${label}</span>
+    <input type="text" inputmode="decimal" class="field wk-mx" data-mid="${m.id}" data-mk="${mk}" data-fld="${k}" value="${x[k] !== undefined && x[k] !== '' ? esc(x[k]) : ''}" placeholder="0" style="width:48px"><em>×${mult}</em></label>`;
+  const chk = (k, label, pts) => `<label class="wk-mi wk-mi-chk"><input type="checkbox" class="wk-mxc" data-mid="${m.id}" data-mk="${mk}" data-fld="${k}" ${x[k] ? 'checked' : ''}><span>${label}</span><em>−${pts}</em></label>`;
+  const extra = calcMonthExtra(m, mk);
+  return `<div class="wk-detail-box">
+    <div class="wk-detail-head">📆 ${esc(monthLabel(mk))} 月度项（每月统计一次）</div>
+    <div class="wk-mgrid">
+      <label class="wk-mi"><span>应出勤排名</span>
+        <select class="field wk-mxs" data-mid="${m.id}" data-mk="${mk}" data-fld="attendanceRank" style="width:92px">
+          <option value="" ${!x.attendanceRank ? 'selected' : ''}>无</option>
+          <option value="1" ${x.attendanceRank == 1 ? 'selected' : ''}>Top1 +3</option>
+          <option value="2" ${x.attendanceRank == 2 ? 'selected' : ''}>Top2 +2</option>
+          <option value="3" ${x.attendanceRank == 3 ? 'selected' : ''}>Top3 +1</option>
+        </select></label>
+      ${num('bonusActivity', '组织活动', 3)}
+      ${num('bonusInitiative', '主动补位', 2)}
+      ${num('bonusOnlineShare', '线上分享', 1)}
+      ${num('bonusEventOwner', '周内大事件', 2)}
+      ${num('bonusTea', '组织下午茶', 1)}
+      ${num('bonusQuiz', '小组答题', 1)}
+      ${num('bonusTrainer', '科室讲师', 3)}
+      ${num('bonusDeptOther', '科室其他活动', '1~3')}
+      ${num('deductPending', 'pending/返稿/跳QC', 0.5)}
+      ${num('deductLow', 'Low 违规', 1)}
+      ${num('deductMed', 'Med 违规', 2)}
+      ${num('deductHigh', 'High 违规', 3)}
+      ${chk('deductQualityRule', '触及质量条例', 1)}
+      ${chk('deductDragGroup', '完成率低致小组不达标', 2)}
+    </div>
+    <div class="wk-auto-line"><span class="wk-auto-tag">自动判定</span>
+      本月严错合计 <b>${errSum}</b> 个 ·
+      无严错 ${errSum === 0 && hasWeekData(mk, m.id) ? '<b class="wk-ok">+2</b>' : '<span class="wk-na">不满足</span>'} ·
+      严错≥3 ${errSum >= 3 ? '<b class="wk-bad">−2</b>' : '<span class="wk-na">不满足</span>'} ·
+      小小组均不达标 ${sj.allFail ? '<b class="wk-bad">−2</b>' : '<span class="wk-na">不满足</span>'}
+    </div>
+    <div class="wk-detail-total">当前月度项小计 <b class="${extra >= 0 ? 'wk-ok' : 'wk-bad'}" data-mxtotal="${m.id}">${extra}</b> 分</div>
+  </div>`;
 }
 
-function calcMonthTotal(memberId, upToWeek) {
-  let total = 0;
-  const weeks = Object.keys(state.team.weeks || {}).sort();
-  for (const wk of weeks) {
-    if (upToWeek && wk > upToWeek) break;
-    const wd = state.team.weeks[wk];
-    if (!wd || !wd.data || !wd.data[memberId]) continue;
-    total += calcMemberWeekScore(
-      state.team.members.find(m => m.id === memberId) || {},
-      wd.data[memberId], wd, wk
-    );
+// 输入时实时重算（不落库）
+function recalcWeeklyUI() {
+  const T = state.team;
+  const pk = T._selectedPeriod; const wk = T.weeks[pk]; if (!wk) return;
+  const mk = monthOfPeriod(wk) || curMonth();
+  const rateMap = {}, errMap = {};
+  $$('.wk-rate').forEach(i => { const n = parseFloat(i.value); rateMap[i.dataset.mid] = isNaN(n) ? null : n; });
+  $$('.wk-err').forEach(i => { const n = parseInt(i.value); errMap[i.dataset.mid] = isNaN(n) ? 0 : n; });
+  allSubGroupList().forEach(({ sg }) => {
+    const j = subGroupMeet(sg.id, mk, rateMap);
+    const headFlag = $(`.wk-sg-head .wk-sg-judge`); // 组头单独刷新见下
+    T.members.filter(m => m.subGroupId === sg.id).forEach(m => {
+      const rate = rateMap[m.id], tgt = memberTarget(m.id, mk), errs = errMap[m.id] || 0;
+      const personalHit = (rate != null && tgt != null) ? rate >= tgt : false;
+      const setF = (pre, v) => { const el = $(`[data-flag="${pre}${m.id}"]`); if (el) el.innerHTML = flagBadge(v); };
+      setF('p-', (rate == null || tgt == null) ? null : personalHit);
+      setF('s-', j.judged ? j.meet : null);
+      setF('e-', errs === 0);
+      const sc = calcWeekScore(personalHit, j.meet, errs);
+      const cell = $(`[data-score="${m.id}"]`);
+      if (cell) { cell.innerHTML = `<b>${sc}</b>`; cell.className = 'wk-score ' + (sc >= 0 ? 'score-pos' : 'score-neg'); }
+    });
+  });
+  // 组头达标徽标
+  $$('.wk-sg-head').forEach((tr, idx) => {
+    const o = allSubGroupList()[idx]; if (!o) return;
+    const j = subGroupMeet(o.sg.id, mk, rateMap);
+    const el = tr.querySelector('.wk-sg-judge');
+    if (el) el.innerHTML = '小小组达标：' + flagBadge(j.judged ? j.meet : null);
+  });
+  const tc = $('#wkTotalCell');
+  if (tc) {
+    let t = 0;
+    T.members.forEach(m => {
+      const rate = rateMap[m.id], tgt = memberTarget(m.id, mk);
+      const personalHit = (rate != null && tgt != null) ? rate >= tgt : false;
+      const sj = subGroupMeet(m.subGroupId, mk, rateMap);
+      t += calcWeekScore(personalHit, sj.meet, errMap[m.id] || 0);
+    });
+    tc.innerHTML = `<b>${t.toFixed(1)}</b>`;
   }
+}
+
+// 月度项输入时实时刷新该成员的小计
+function recalcMonthExtraUI(mid, mk) {
+  const m = state.team.members.find(x => x.id === mid);
+  if (!m || !mk) return;
+  const x = {};
+  $$(`.wk-mx[data-mid="${mid}"], .wk-mxc[data-mid="${mid}"], .wk-mxs[data-mid="${mid}"]`).forEach(i => {
+    x[i.dataset.fld] = i.type === 'checkbox' ? i.checked : (i.value || '').trim();
+  });
+  const extra = calcMonthExtraFrom(x, m, mk);
+  const el = $(`[data-mxtotal="${mid}"]`);
+  if (el) { el.textContent = extra; el.className = extra >= 0 ? 'wk-ok' : 'wk-bad'; }
+}
+// 失焦即落库：单个「完成率 / 严错数」输入
+function commitWeekInput(input) {
+  const T = state.team;
+  const wk = T.weeks[T._selectedPeriod];
+  const mid = input.dataset.mid;
+  if (!wk || !mid) return;
+  wk.data = wk.data || {}; wk.data[mid] = wk.data[mid] || {};
+  const fld = input.classList.contains('wk-rate') ? 'completionRate' : 'seriousErrors';
+  const clean = (input.value || '').trim().replace(/[^\d.]/g, '');
+  wk.data[mid][fld] = clean;
+  if (input.value !== clean) input.value = clean;
+  save();
+}
+// 失焦即落库：单个月度项
+function commitMonthExtra(mid, mk, fld) {
+  if (!mid || !mk || !fld) return;
+  const el = $(`.wk-mx[data-mid="${mid}"][data-fld="${fld}"], .wk-mxc[data-mid="${mid}"][data-fld="${fld}"], .wk-mxs[data-mid="${mid}"][data-fld="${fld}"]`);
+  if (!el) return;
+  monthExtras(mk, mid)[fld] = el.type === 'checkbox' ? el.checked : (el.value || '').trim();
+  save();
+}
+
+/* ---- 积分核算引擎（基于 TEAM_RULES 自动核算） ---- */
+// 周项得分：见 weekScoreOf()；月度项得分：见 calcMonthExtra()
+// 某成员在某月的完整得分 = 该月各周得分之和 + 月度项得分
+function monthTotalOf(mid, mk) {
+  const m = state.team.members.find(x => x.id === mid); if (!m) return 0;
+  const weeksSum = periodsInMonth(mk).reduce((a, k) => a + weekScoreOf(k, mid), 0);
+  return Math.round((weeksSum + calcMonthExtra(m, mk)) * 10) / 10;
+}
+// 兼容旧签名：按周累计（截至 upToPeriod）
+function calcMonthTotal(memberId, upToPeriod) {
+  const mk = upToPeriod ? (monthOfPeriod(state.team.weeks[upToPeriod]) || curMonth()) : curMonth();
+  let total = periodsInMonth(mk).filter(k => !upToPeriod || k <= upToPeriod).reduce((a, k) => a + weekScoreOf(k, memberId), 0);
+  const m = state.team.members.find(x => x.id === memberId);
+  if (m) total += calcMonthExtra(m, mk);
   return Math.round(total * 10) / 10;
 }
 
 /* ---- 积分看板 ---- */
 function renderTeamScoreboard(v) {
   const T = state.team;
-  const weekKeys = Object.keys(T.weeks || {}).sort().reverse();
-  const selMonth = T._sbMonth || (new Date().getMonth() + 1);
+  const months = [...new Set(periodList().map(k => monthOfPeriod(T.weeks[k])).filter(Boolean))];
+  if (!months.includes(curMonth())) months.push(curMonth());
+  months.sort().reverse();
+  const selMonth = (T._sbMonth && months.includes(T._sbMonth)) ? T._sbMonth : months[0];
+  T._sbMonth = selMonth;
 
   v.innerHTML = `<div class="card"><div class="card-head"><h2>🏆 积分看板</h2>
-    <span class="ch-sub">
-      月份: <select class="field" id="sbMonthSelect" style="width:100px">
-        ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m==selMonth?'selected':''}>${m}月</option>`).join('')}
-      </select>
-    </span>
+    <span class="ch-sub">月份: <select class="field" id="sbMonthSelect" style="width:130px">
+        ${months.map(m => `<option value="${m}" ${m === selMonth ? 'selected' : ''}>${esc(monthLabel(m))}</option>`).join('')}
+      </select></span>
   </div>
   <div id="sbContent"></div></div>`;
   renderSBContent(selMonth);
 }
-function renderSBContent(month) {
+function renderSBContent(mk) {
   const T = state.team;
   const c = $('#sbContent');
-  const year = new Date().getFullYear();
-  const monthWeeks = Object.keys(T.weeks || {}).filter(k => {
-    const m = k.match(/^(\d{4})-W(\d{2})$/);
-    if (!m) return false;
-    // 简单判断：根据 weekDate 判断月份
-    const wd = T.weeks[k];
-    if (!wd || !wd.weekDate) return false;
-    const d = new Date(wd.weekDate);
-    return d.getFullYear() === year && (d.getMonth() + 1) === month;
-  }).sort();
+  if (!c) return;
+  const monthWeeks = periodsInMonth(mk);
 
-  if (monthWeeks.length === 0) { c.innerHTML = '<div class="empty">该月暂无周数据，请先在「周数据录入」中添加</div>'; return; }
+  if (monthWeeks.length === 0) { c.innerHTML = `<div class="empty">${esc(monthLabel(mk))} 暂无周数据，请先在「周数据录入」中创建日期区间</div>`; return; }
 
-  // 月度累计排行
-  const monthlyTotals = T.members.map(m => ({
-    id: m.id, name: m.name,
-    total: calcMonthTotal(m.id, monthWeeks[monthWeeks.length - 1])
-  })).sort((a, b) => b.total - a.total);
+  // 月度累计排行（各周得分 + 月度项）
+  const monthlyTotals = T.members.map(m => ({ id: m.id, name: m.name, total: monthTotalOf(m.id, mk) })).sort((a, b) => b.total - a.total);
 
   let html = `<div class="card card-soft" style="margin-bottom:16px">
-    <h3 style="margin:0 0 10px;font-size:15px">🥇 ${month}月累计积分 Top 排行 <span style="font-weight:400;color:var(--ink-faint);font-size:12px">（截至最新一周）</span></h3>
+    <h3 style="margin:0 0 10px;font-size:15px">🥇 ${esc(monthLabel(mk))} 累计积分 Top 排行 <span style="font-weight:400;color:var(--ink-faint);font-size:12px">（各周得分 + 月度项）</span></h3>
     <div class="podium">`;
   monthlyTotals.forEach((m, i) => {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
-    const isTop3 = i < 3;
-    html += `<div class="podium-item ${isTop3 ? 'podium-top3' : ''}">
+    html += `<div class="podium-item ${i < 3 ? 'podium-top3' : ''}">
       <span class="podium-rank">${medal}</span>
       <span class="podium-name">${esc(m.name)}</span>
       <span class="podium-score ${m.total >= 0 ? 'score-pos' : 'score-neg'}">${m.total}</span>
@@ -907,73 +1197,40 @@ function renderSBContent(month) {
     ${monthlyTotals.length > 0 && monthlyTotals[0].total > 0 ? '<p style="margin:8px 0 0;font-size:12px;color:var(--ink-faint)">🎁 每月积分 Top 3 有价值不等的额外惊喜哦～</p>' : ''}
   </div>`;
 
-  // 各周明细
+  // 各周明细（按小小组上色）
   html += `<h3 style="margin:16px 0 10px;font-size:15px">📊 各周积分明细</h3>
     <div class="card card-soft"><div style="overflow-x:auto">
     <table class="team-table">
-      <thead><tr><th>成员</th>${monthWeeks.map(wk => `<th>${wk}<br><small>${(T.weeks[wk]||{}).weekDate||''}</small></th>`).join('')}<th>月合计</th></tr></thead>
+      <thead><tr><th>成员</th>${monthWeeks.map(k => `<th>${esc(weekLabel(T.weeks[k]))}</th>`).join('')}<th>月度项</th><th>月合计</th></tr></thead>
       <tbody>`;
-  T.members.forEach(m => {
-    html += `<tr><td><b>${esc(m.name)}</b></td>`;
-    let mTotal = 0;
-    monthWeeks.forEach(wk => {
-      const wd = T.weeks[wk];
-      const d = (wd && wd.data) ? wd.data[m.id] : null;
-      const s = d ? calcMemberWeekScore(m, d, wd, wk) : '-';
-      if (typeof s === 'number') mTotal += s;
-      const cls = typeof s === 'number' ? (s >= 0 ? 'score-pos' : 'score-neg') : '';
-      html += `<td class="${cls}" style="text-align:center">${s}</td>`;
+  const cmap = sgColorMap();
+  allSubGroupList().forEach(({ sg }) => {
+    const color = cmap[sg.id] || 'tm-sg-a';
+    const mems = T.members.filter(m => m.subGroupId === sg.id);
+    if (!mems.length) return;
+    html += `<tr class="wk-sg-head ${color}"><td colspan="${monthWeeks.length + 3}">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span></td></tr>`;
+    mems.forEach(m => {
+      html += `<tr class="wk-row ${color}"><td class="wk-mem">${esc(m.name)}</td>`;
+      let wsum = 0;
+      monthWeeks.forEach(k => {
+        const d = (((T.weeks[k] || {}).data || {})[m.id] || {});
+        const has = d.completionRate !== undefined && d.completionRate !== '';
+        const s = has ? weekScoreOf(k, m.id) : '-';
+        if (typeof s === 'number') wsum += s;
+        const cls = typeof s === 'number' ? (s >= 0 ? 'score-pos' : 'score-neg') : '';
+        html += `<td class="${cls}" style="text-align:center">${s}</td>`;
+      });
+      const extra = calcMonthExtra(m, mk);
+      const total = Math.round((wsum + extra) * 10) / 10;
+      html += `<td class="${extra >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center">${extra}</td>
+        <td class="${total >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center;font-weight:800">${total}</td></tr>`;
     });
-    html += `<td class="${mTotal >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center;font-weight:800">${Math.round(mTotal*10)/10}</td></tr>`;
   });
   html += `</tbody></table></div></div>`;
 
   c.innerHTML = html;
 }
 
-/* ---- 积分规则弹窗 ---- */
-function showTeamRules() {
-  openModal(`<h2>📋 积分规则一览</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;line-height:1.8">
-      <div><h4 style="color:var(--green-500);margin:0 0 6px">✅ 加分</h4>
-        <table style="width:100%;border-collapse:collapse">
-          <tr><td colspan="3" style="background:var(--green-50);font-weight:700;padding:4px 8px">每周</td></tr>
-          <tr><td>个人完成率目标</td><td>+1</td></tr>
-          <tr><td>小小组完成率达标</td><td>+1</td></tr>
-          <tr><td>个人本周无差错</td><td>+1</td></tr>
-          <tr><td colspan="3" style="background:var(--green-50);font-weight:700;padding:4px 8px;margin-top:6px">每月</td></tr>
-          <tr><td>应出勤组内 Top 1</td><td>+3</td></tr>
-          <tr><td>应出勤组内 Top 2</td><td>+2</td></tr>
-          <tr><td>应出勤组内 Top 3</td><td>+1</td></tr>
-          <tr><td>无严错</td><td>+2</td></tr>
-          <tr><td>组织技能分享/座谈会等线下活动</td><td>+3/次</td></tr>
-          <tr><td>主动接收临时紧急任务/补位/提建议</td><td>+2/次</td></tr>
-          <tr><td>线上 case 分享/tips/疑难攻坚</td><td>+1/次</td></tr>
-          <tr><td>周内大事件负责人</td><td>+2/次</td></tr>
-          <tr><td>组织下茶水</td><td>+1/次</td></tr>
-          <tr><td>小组答题</td><td>+1/次</td></tr>
-          <tr><td>科室培训讲师</td><td>+3/次</td></tr>
-          <tr><td>科室其他推动</td><td>+1~3</td></tr>
-        </table>
-      </div>
-      <div><h4 style="color:#C62828;margin:0 0 6px">❌ 扣分</h4>
-        <table style="width:100%;border-collapse:collapse">
-          <tr><td colspan="2" style="background:#FFEBEE;font-weight:700;padding:4px 8px">每人/每周</td></tr>
-          <tr><td>每产生 1 个严错</td><td>-0.5</td></tr>
-          <tr><td>pending / 误稿 / 漏 QC</td><td>-0.5/次</td></tr>
-          <tr><td colspan="2" style="background:#FFEBEE;font-weight:700;padding:4px 8px;margin-top:6px">每月</td></tr>
-          <tr><td>严错 ≥ 3 个</td><td>-2</td></tr>
-          <tr><td>触及当月质量目标具体条例</td><td>-1</td></tr>
-          <tr><td>完成率低导致小组不达标</td><td>-2</td></tr>
-          <tr><td>Low 等级违规（未送美修/delay）</td><td>-1/次</td></tr>
-          <tr><td>Medium 等级违规</td><td>-1/次</td></tr>
-          <tr><td>High 等级违规</td><td>-3/次</td></tr>
-          <tr><td>小小组成员完成率均不达标</td><td>-2</td></tr>
-        </table>
-        <p style="margin-top:10px;color:var(--ink-faint);font-size:12px">⚠️ 积分规则：每周一同步上周积分情况，每月统计一次总积分<br>每月积分 Top 3 有价值不等的额外惊喜哦～</p>
-      </div>
-    </div>`);
-}
 
 function historyDay(d) {
   const list = state.work.todos[d] || [];
@@ -1644,31 +1901,64 @@ $('#view').addEventListener('click', e => {
     renderTeam();
     toast('✅ 已保存 ' + esc(m.name) + ' 目标: ' + (newTarget || '(空)') + '%');
   }
-  else if (act === 'team-create-week') {
-    const dateStr = $('#newWeekDate').value || todayStr();
-    const wk = getWeekKey(dateStr);
-    if (state.team.weeks[wk]) { toast('该周已存在'); return; }
-    state.team.weeks[wk] = { weekDate: dateStr, data: {} };
-    state.team._selectedWeek = wk; save();
-    renderTeam(); toast(`已创建 ${wk}`);  }
-  else if (act === 'team-save-week') {
-    const wk = el.dataset.week;
-    if (!state.team.weeks[wk]) { toast('周数据不存在'); return; }
-    state.team.weeks[wk].data = state.team.weeks[wk].data || {};
-    $$('.team-cell').forEach(input => {
-      const mid = input.dataset.mid, fld = input.dataset.fld;
-      if (!mid || !fld) return;
-      if (!state.team.weeks[wk].data[mid]) state.team.weeks[wk].data[mid] = {};
-      let val;
-      if (input.type === 'checkbox') val = input.checked;
-      else if (input.type === 'number' || input.tagName === 'SELECT') val = input.value === '' ? '' : parseFloat(input.value);
-      else val = input.value;
-      state.team.weeks[wk].data[mid][fld] = val;
-    });
-    save(); toast(`${wk} 数据已保存 ✅`);
-    renderWeeklyForm(wk); // 刷新显示积分
+  else if (act === 'team-create-period') {
+    const sEl = $('#wkNewStart'), eEl = $('#wkNewEnd');
+    const s = (sEl ? sEl.value : '') || mondayStr();
+    const e = (eEl ? eEl.value : '') || sundayStr(s);
+    if (!s) { toast('请先选择起始日期'); return; }
+    if (e < s) { toast('❌ 结束日期不能早于起始日期'); return; }
+    if (state.team.weeks[s]) { toast('该起始日期的区间已存在'); state.team._selectedPeriod = s; save(); renderTeam(); return; }
+    state.team.weeks[s] = { start: s, end: e, data: {} };
+    state.team._selectedPeriod = s; save();
+    renderTeam(); toast(`✅ 已创建区间 ${s} ~ ${e}`);
   }
-  else if (act === 'team-show-rules') { showTeamRules(); }
+  else if (act === 'team-del-period') {
+    const k = el.dataset.k;
+    if (!state.team.weeks[k]) return;
+    if (!confirm(`确定删除区间「${weekLabel(state.team.weeks[k])}」？\n该区间已录入的数据将一并删除。`)) return;
+    delete state.team.weeks[k];
+    if (state.team._selectedPeriod === k) state.team._selectedPeriod = periodList()[0] || '';
+    save(); renderTeam(); toast('🗑 已删除该区间');
+  }
+  else if (act === 'wk-toggle-more') {
+    const mid = el.dataset.mid;
+    const row = $(`[data-detail="${mid}"]`);
+    if (row) {
+      const open = row.style.display !== 'none';
+      row.style.display = open ? 'none' : '';
+      el.classList.toggle('on', !open);
+      if (!state.team._openDetails) state.team._openDetails = {};
+      state.team._openDetails[mid] = !open;
+      save();
+    }
+  }
+  else if (act === 'team-save-period') {
+    const k = el.dataset.k;
+    const wk = state.team.weeks[k];
+    if (!wk) { toast('区间不存在'); return; }
+    wk.data = wk.data || {};
+    const mk = monthOfPeriod(wk) || curMonth();
+    // 每周项：完成率 / 严错数（自动计分的两个输入）
+    $$('.wk-rate').forEach(i => {
+      const mid = i.dataset.mid; if (!mid) return;
+      wk.data[mid] = wk.data[mid] || {};
+      wk.data[mid].completionRate = (i.value || '').trim().replace(/[^\d.]/g, '');
+    });
+    $$('.wk-err').forEach(i => {
+      const mid = i.dataset.mid; if (!mid) return;
+      wk.data[mid] = wk.data[mid] || {};
+      wk.data[mid].seriousErrors = (i.value || '').trim().replace(/[^\d.]/g, '');
+    });
+    // 月度项
+    $$('.wk-mx, .wk-mxc, .wk-mxs').forEach(i => {
+      const mid = i.dataset.mid, fld = i.dataset.fld;
+      if (!mid || !fld) return;
+      const x = monthExtras(mk, mid);
+      x[fld] = i.type === 'checkbox' ? i.checked : (i.value || '').trim();
+    });
+    save(); renderTeam(); toast(`✅ ${weekLabel(wk)} 数据已保存`);
+  }
+  else if (act === 'team-show-rules') { state.team.activeTab = 'rules'; save(); renderTeam(); }
   else if (act === 'report-open') openReport();
   else if (['report-gen', 'report-gen-custom', 'report-copy', 'report-export', 'report-export-docx'].includes(act)) handleReport(act, el);
   else if (act === 'quiz-open') { openQuiz(); }
@@ -1746,15 +2036,27 @@ $('#view').addEventListener('click', e => {
   const chip = e.target.closest('#freshFilter .chip');
   if (chip) { freshFilter = chip.dataset.cat; viewFresh($('#view')); }
 });
-/* 小组管理：周选择 / 月选择 change */
+/* 小组管理：日期区间选择 / 月选择 change */
 $('#view').addEventListener('change', e => {
-  if (e.target.id === 'weekSelect') {
-    state.team._selectedWeek = e.target.value || ''; save();
+  if (e.target.id === 'wkPeriodSel') {
+    state.team._selectedPeriod = e.target.value || ''; save();
     renderWeeklyForm(e.target.value);
+    return;
+  }
+  // 月度项变动 → 刷新该行小计 + 顺手落库
+  if (e.target.classList && (e.target.classList.contains('wk-mx') || e.target.classList.contains('wk-mxc') || e.target.classList.contains('wk-mxs'))) {
+    recalcMonthExtraUI(e.target.dataset.mid, e.target.dataset.mk);
+    commitMonthExtra(e.target.dataset.mid, e.target.dataset.mk, e.target.dataset.fld);
+    return;
+  }
+  // 完成率 / 严错数 失焦即自动落库（避免忘记点保存导致丢数据）
+  if (e.target.classList && (e.target.classList.contains('wk-rate') || e.target.classList.contains('wk-err'))) {
+    commitWeekInput(e.target);
+    return;
   }
   if (e.target.id === 'sbMonthSelect') {
-    state.team._sbMonth = parseInt(e.target.value); save();
-    renderSBContent(state.team._sbMonth);
+    state.team._sbMonth = e.target.value; save();
+    renderSBContent(e.target.value);
   }
   // 成员管理：切换大组时联动小小组
   if (e.target.classList.contains('team-sg-select')) {
@@ -1763,6 +2065,13 @@ $('#view').addEventListener('change', e => {
     const g = state.team.groups.find(gr => gr.id === newGid);
     if (g) { e.target.innerHTML = g.subGroups.map(sg => `<option value="${sg.id}" ${sg.id===e.target.value?'selected':''}>${esc(sg.name)}</option>`).join(''); }
   }
+});
+/* 周数据录入：完成率 / 严错数 输入即时重算得分 */
+$('#view').addEventListener('input', e => {
+  const t = e.target;
+  if (!t || !t.classList) return;
+  if (t.classList.contains('wk-rate') || t.classList.contains('wk-err')) recalcWeeklyUI();
+  else if (t.classList.contains('wk-mx') || t.classList.contains('wk-mxs')) recalcMonthExtraUI(t.dataset.mid, t.dataset.mk);
 });
 
 /* =================== 弹窗事件委托 =================== */
