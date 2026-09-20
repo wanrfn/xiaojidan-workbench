@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260920c'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260920e'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -481,7 +481,7 @@ const TEAM_RULES = {
   plus: [
     { period: '每周', cat: '业务数据', items: [
       { key: 'bonusPersonalGoal', name: '个人完成率目标', pts: 1, auto: '完成率 ≥ 个人目标' },
-      { key: 'bonusSubGroupGoal', name: '小小组完成率达标（小组）', pts: 1, auto: '小小组全员达标' },
+      { key: 'bonusSubGroupGoal', name: '小小组完成率达标（小组）', pts: 1, auto: '小小组平均完成率 ≥ 小小组目标（= 成员个人目标均值）' },
       { key: 'bonusNoErrorWeek', name: '个人本周无严错产生', pts: 1, auto: '严错数 = 0' }
     ]},
     { period: '每月', cat: '业务数据', items: [
@@ -583,7 +583,7 @@ function renderTeamRules(v) {
     <div class="rule-note">
       <b>自动计分说明：</b>「周数据录入」里只需填写 <b>完成率</b> 与 <b>严错数</b>，
       系统会据此自动判定 <b>个人完成率目标</b>（完成率 ≥ 个人目标 +1）、
-      <b>小小组完成率达标</b>（小小组全员达标 +1）、
+      <b>小小组完成率达标</b>（该小小组<b>平均完成率 ≥ 小小组目标</b>时 +1；小小组目标 = 组内成员个人目标均值，在「成员管理」自动显示）、
       <b>无严错</b>（严错数 = 0 时 +1，否则每个严错 -0.5），并即时给出本周得分。<br>
       标注「每月」的项按月统计，在成员行内展开「更多」后填写；每月积分 Top 3 有额外惊喜～
     </div>
@@ -695,13 +695,17 @@ function renderTeamMembers(v) {
         const colorKey = 'tm-sg-' + SG_COLORS[si % SG_COLORS.length];
         si++;
         const mems = T.members.filter(m => m.subGroupId === sg.id || (m.groupId === g.id && m.subGroupId === sg.id));
+        const sgVals = mems.map(m => parseFloat(mTarget(mk, m.id))).filter(n => !isNaN(n));
+        const sgAvg = sgVals.length ? (sgVals.reduce((a, b) => a + b, 0) / sgVals.length) : null;
         mems.forEach((m, i) => {
           const val = mTarget(mk, m.id);
           rows.push(`<tr>
             <td class="tm-td-grp ${colorKey}">${i === 0 ? esc(sg.name) : ''}</td>
             <td class="tm-td-name ${colorKey}">${esc(m.name)}</td>
             <td class="tm-td-target ${colorKey}"><input type="text" class="field tm-target-cell" data-mid="${m.id}" data-mk="${mk}" value="${esc(val)}" placeholder="—" style="width:78px;text-align:center"></td>
-            <td class="tm-td-sgtarget ${colorKey}">${i === 0 ? (sg.target ? esc(sg.target) + '%' : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
+            <td class="tm-td-sgtarget ${colorKey}" data-sg="${sg.id}">${i === 0 ? (sgAvg != null
+              ? `<span class="tm-sgavg" title="小小组完成率目标 = 组内 ${sgVals.length} 位成员个人目标的均值（自动计算）">${sgAvg.toFixed(2)}%</span>`
+              : '<span style="color:var(--ink-faint)">—</span>') : ''}</td>
             <td class="tm-td-act ${colorKey}">${mk === activeM ? `<button class="btn sm ghost" data-act="team-del-member" data-mid="${m.id}" style="color:var(--danger);padding:2px 6px">✕</button>` : ''}</td>
           </tr>`);
         });
@@ -716,7 +720,7 @@ function renderTeamMembers(v) {
         <table class="tm-table">
           <thead><tr><th style="width:90px">组别</th><th>Name</th><th style="width:90px">个人目标</th><th style="width:110px">小小组完成率目标</th><th style="width:40px"></th></tr></thead>
           <tbody>${rows.join('')}</tbody>
-          <tfoot><tr class="tm-tfoot"><td colspan="3">入职年限总目标</td><td>${avg ? avg + '%' : '—'}</td><td></td></tr></tfoot>
+          <tfoot><tr class="tm-tfoot"><td colspan="3">入职年限总目标</td><td class="tm-td-gavg" data-g="${g.id}">${avg ? avg + '%' : '—'}</td><td></td></tr></tfoot>
         </table>
       </div>`;
     }).join('');
@@ -757,6 +761,7 @@ function renderTeamMembers(v) {
   }).join('');
 
   v.innerHTML = `<div class="card"><div class="card-head"><h2>👥 成员管理（共${T.members.length}人）</h2><span class="ch-sub">目标按月存档，可直接在表格里填写</span></div>
+  <div class="tm-hint">📐 <b>小小组完成率目标</b> = 该小小组「成员个人目标」的均值（自动计算，随个人目标实时变化）；它同时是「周数据录入」里 <b>小小组达标</b> 的判定基准。<button class="btn xs" data-act="team-goto-weekly">去「周数据录入」看达标 →</button></div>
   <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <button class="btn primary sm" data-act="team-add-member">${showAdd ? '－ 取消添加' : '＋ 添加成员'}</button>
     <label class="tm-lb" style="margin-left:4px">月份</label>
@@ -860,19 +865,41 @@ function memberTarget(mid, mk) {
   const n = parseFloat(r.val);
   return isNaN(n) ? null : n;
 }
-// 小小组达标判定：全员达标 meet / 全员不达标 allFail
-function subGroupMeet(sgId, mk, rateMap) {
+// 小小组完成率目标 = 该小小组「成员个人目标」的均值（自动推导，不单独存字段）
+// resolved=false：严格当月口径（成员管理表格与它显示的数值一致）
+// resolved=true ：就近沿用口径（周数据录入 / 算分，与 memberTarget 一致）
+function sgTargetAvg(sgId, mk, resolved) {
   const ms = state.team.members.filter(m => m.subGroupId === sgId);
-  if (!ms.length) return { meet: false, allFail: false, judged: false };
-  let meet = true, fail = true, judged = false;
-  ms.forEach(m => {
-    const t = memberTarget(m.id, mk);
-    const r = rateMap[m.id];
-    if (t == null || r == null || isNaN(r)) return;
-    judged = true;
-    if (r >= t) fail = false; else meet = false;
-  });
-  return { meet: judged && meet, allFail: judged && fail, judged };
+  const vals = ms.map(m => parseFloat(resolved ? mTargetResolved(mk, m.id).val : mTarget(mk, m.id)))
+                 .filter(n => !isNaN(n));
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+// 小小组达标判定：该小小组「已填完成率成员的平均完成率」≥「小小组完成率目标」
+// 返回 { meet, allFail, judged, avg, sgt, n }
+//   avg = 组内已填完成率成员的平均完成率；sgt = 小小组目标；n = 参与平均的人数
+//   该组没有任何目标时 judged=false（显示「—」而非判为不达标）
+function subGroupMeet(sgId, mk, rateMap) {
+  const res = { meet: false, allFail: false, judged: false, avg: null, sgt: null, n: 0 };
+  const ms = state.team.members.filter(m => m.subGroupId === sgId);
+  if (!ms.length || !rateMap) return res;
+  const rates = ms.map(m => rateMap[m.id]).filter(r => r != null && !isNaN(r));
+  if (!rates.length) return res;
+  res.n = rates.length;
+  res.avg = rates.reduce((a, b) => a + b, 0) / rates.length;
+  res.sgt = sgTargetAvg(sgId, mk, true);
+  if (res.sgt == null) return res;
+  res.judged = true;
+  res.meet = res.avg >= res.sgt;
+  res.allFail = !res.meet;
+  return res;
+}
+// 周数据组头的「小小组目标 / 组均 / 达标」片段（初渲染与实时重算共用，保证口径一致）
+function sgJudgeHtml(j) {
+  const pct = n => n != null ? n.toFixed(2) + '%' : '—';
+  return `<span class="wk-sg-target">小小组目标 <b>${j.sgt != null ? pct(j.sgt) : '未设'}</b></span>`
+    + `<span class="wk-sg-avg">组均 <b>${pct(j.avg)}</b>${j.n ? `<i>（${j.n}人）</i>` : ''}</span>`
+    + `<span class="wk-sg-judge">小小组达标：${flagBadge(j.judged ? j.meet : null)}</span>`;
 }
 // 本周得分（只含「每周」规则项）
 function calcWeekScore(personalHit, subHit, errs) {
@@ -996,7 +1023,7 @@ function renderWeeklyForm(pk) {
     const mems = T.members.filter(m => m.subGroupId === sg.id);
     const j = subGroupMeet(sg.id, mk, rateMap);
     rows.push(`<tr class="wk-sg-head ${color}"><td colspan="9">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span>
-      <span class="wk-sg-judge">小小组达标：${flagBadge(j.judged ? j.meet : null)}</span></td></tr>`);
+      <span class="wk-sg-meta" data-sg="${sg.id}">${sgJudgeHtml(j)}</span></td></tr>`);
     if (!mems.length) { rows.push(`<tr class="wk-row ${color}"><td class="wk-empty" colspan="9">暂无成员</td></tr>`); return; }
     mems.forEach(m => {
       const d = (wk.data || {})[m.id] || {};
@@ -1037,7 +1064,7 @@ function renderWeeklyForm(pk) {
       <td></td>
     </tr></tfoot>
   </table></div>
-  <div class="wk-tipbox">💡 「个人目标」直接取自 <b>成员管理</b> 里 ${esc(monthLabel(mk))} 的目标，也可以在这里直接改（改完自动同步回成员管理）。「个人达标 / 小小组达标 / 无严错」由系统按 <b>加减分规则</b> 自动判定，本周得分 = 达标项加分 − 严错扣分；每月项目点行末 <b>⋯</b> 展开填写。</div>
+  <div class="wk-tipbox">💡 「个人目标」直接取自 <b>成员管理</b> 里 ${esc(monthLabel(mk))} 的目标，也可以在这里直接改（改完自动同步回成员管理）。<b>小小组目标</b> = 该小小组组员个人目标的均值（见「成员管理」最后一列），组头会实时显示 <b>组均 vs 目标</b> 并判定<b>小小组达标</b>。「个人达标 / 小小组达标 / 无严错」均由系统按 <b>加减分规则</b> 自动判定，本周得分 = 达标项加分 − 严错扣分；每月项目点行末 <b>⋯</b> 展开填写。</div>
   <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn primary" data-act="team-save-period" data-k="${pk}">💾 保存本周数据</button>
     <button class="btn yellow sm" data-act="team-show-rules">📋 查看加减分规则</button>
@@ -1098,7 +1125,6 @@ function recalcWeeklyUI() {
   $$('.wk-err').forEach(i => { const n = parseInt(i.value); errMap[i.dataset.mid] = isNaN(n) ? 0 : n; });
   allSubGroupList().forEach(({ sg }) => {
     const j = subGroupMeet(sg.id, mk, rateMap);
-    const headFlag = $(`.wk-sg-head .wk-sg-judge`); // 组头单独刷新见下
     T.members.filter(m => m.subGroupId === sg.id).forEach(m => {
       const rate = rateMap[m.id], tgt = memberTarget(m.id, mk), errs = errMap[m.id] || 0;
       const personalHit = (rate != null && tgt != null) ? rate >= tgt : false;
@@ -1110,13 +1136,9 @@ function recalcWeeklyUI() {
       const cell = $(`[data-score="${m.id}"]`);
       if (cell) { cell.innerHTML = `<b>${sc}</b>`; cell.className = 'wk-score ' + (sc >= 0 ? 'score-pos' : 'score-neg'); }
     });
-  });
-  // 组头达标徽标
-  $$('.wk-sg-head').forEach((tr, idx) => {
-    const o = allSubGroupList()[idx]; if (!o) return;
-    const j = subGroupMeet(o.sg.id, mk, rateMap);
-    const el = tr.querySelector('.wk-sg-judge');
-    if (el) el.innerHTML = '小小组达标：' + flagBadge(j.judged ? j.meet : null);
+    // 组头：小小组目标 / 组均 / 达标 一起实时刷新
+    const head = $(`.wk-sg-meta[data-sg="${sg.id}"]`);
+    if (head) head.innerHTML = sgJudgeHtml(j);
   });
   const tc = $('#wkTotalCell');
   if (tc) {
@@ -1875,6 +1897,11 @@ $('#view').addEventListener('click', e => {
     save(); renderTeam();
     toast(`✅ 已保存 ${monthLabel(mk)} 的 ${n} 位成员目标`);
   }
+  else if (act === 'team-goto-weekly') {
+    // 从成员管理跳到周数据录入（小小组目标 → 周表达标判定的联动入口）
+    state.team.activeTab = 'weekly';
+    save(); renderTeam();
+  }
   else if (act === 'team-month-toggle') {
     const mk = el.dataset.mk;
     const mo = ensureMonth(mk);
@@ -2085,6 +2112,48 @@ $('#view').addEventListener('click', e => {
   const chip = e.target.closest('#freshFilter .chip');
   if (chip) { freshFilter = chip.dataset.cat; viewFresh($('#view')); }
 });
+// 成员管理：改「个人目标」时，实时刷新该小小组的「小小组完成率目标」与大组「入职年限总目标」
+// 只改单元格内容，不整块重渲染 —— 否则正在输入的输入框会失焦
+function refreshMemberAverages(input) {
+  const table = input.closest('table');
+  if (!table) return;
+  const T = state.team;
+  const m = T.members.find(x => x.id === input.dataset.mid);
+  if (!m) return;
+  const pct = v => v != null ? v.toFixed(2) + '%' : '—';
+  const valOf = id => {
+    const el = table.querySelector(`.tm-target-cell[data-mid="${id}"]`);
+    return el ? parseFloat((el.value || '').trim()) : NaN;
+  };
+  const avgOf = ids => {
+    const v = ids.map(valOf).filter(n => !isNaN(n));
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  };
+  // 本小小组
+  const sgIds = T.members.filter(x => x.subGroupId === m.subGroupId).map(x => x.id);
+  const sgAvg = avgOf(sgIds);
+  const cell = table.querySelector(`.tm-td-sgtarget[data-sg="${m.subGroupId}"]`);
+  if (cell) cell.innerHTML = sgAvg != null
+    ? `<span class="tm-sgavg" title="小小组完成率目标 = 组内 ${sgIds.filter(id => !isNaN(valOf(id))).length} 位成员个人目标的均值（自动计算）">${pct(sgAvg)}</span>`
+    : '<span style="color:var(--ink-faint)">—</span>';
+  // 本大组（入职年限总目标）
+  const gIds = T.members.filter(x => x.groupId === m.groupId).map(x => x.id);
+  const gAvg = avgOf(gIds);
+  const fcell = table.querySelector(`.tm-td-gavg[data-g="${m.groupId}"]`);
+  if (fcell) fcell.textContent = gAvg != null ? pct(gAvg) : '—';
+}
+// 失焦即落库：成员管理的「个人目标」格子（与周数据录入共用同一份 months[mk].targets）
+function commitMemberTarget(input) {
+  if (!input) return;
+  const mid = input.dataset.mid;
+  const mk = input.dataset.mk || curMonth();
+  if (!mid || !state.team.members.find(x => x.id === mid)) return;
+  const clean = (input.value || '').trim().replace(/[^\d.]/g, '');
+  if (input.value !== clean) input.value = clean;
+  ensureMonth(mk).targets[mid] = clean;
+  save();
+}
+
 /* 小组管理：日期区间选择 / 月选择 change */
 $('#view').addEventListener('change', e => {
   if (e.target.id === 'wkPeriodSel') {
@@ -2108,6 +2177,12 @@ $('#view').addEventListener('change', e => {
     commitWeekInput(e.target);
     return;
   }
+  // 成员管理改「个人目标」→ 失焦即落库，并刷新小小组目标 / 大组总目标
+  if (e.target.classList && e.target.classList.contains('tm-target-cell')) {
+    commitMemberTarget(e.target);
+    refreshMemberAverages(e.target);
+    return;
+  }
   if (e.target.id === 'sbMonthSelect') {
     state.team._sbMonth = e.target.value; save();
     renderSBContent(e.target.value);
@@ -2120,12 +2195,13 @@ $('#view').addEventListener('change', e => {
     if (g) { e.target.innerHTML = g.subGroups.map(sg => `<option value="${sg.id}" ${sg.id===e.target.value?'selected':''}>${esc(sg.name)}</option>`).join(''); }
   }
 });
-/* 周数据录入：完成率 / 严错数 输入即时重算得分 */
+/* 周数据录入：完成率 / 严错数 输入即时重算得分；成员管理：目标输入即时刷新小小组目标 */
 $('#view').addEventListener('input', e => {
   const t = e.target;
   if (!t || !t.classList) return;
   if (t.classList.contains('wk-rate') || t.classList.contains('wk-err')) recalcWeeklyUI();
   else if (t.classList.contains('wk-mx') || t.classList.contains('wk-mxs')) recalcMonthExtraUI(t.dataset.mid, t.dataset.mk);
+  else if (t.classList.contains('tm-target-cell')) refreshMemberAverages(t);   // 输入即时预览，落库在失焦时
 });
 
 /* =================== 弹窗事件委托 =================== */
