@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260920a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260920b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -834,8 +834,32 @@ function normalizeWeeks() {
   return changed;
 }
 
+// 某月是否已设置过任何成员目标
+function monthHasTargets(mk) {
+  const t = ((state.team.months || {})[mk] || {}).targets || {};
+  return Object.keys(t).some(id => t[id] !== '' && t[id] != null);
+}
+// 个人目标「就近沿用」：优先取该月；该月没填则沿用最近一次设置过的目标
+// 返回 { val, from, carried }：val=取到的值，from=实际来源月份，carried=是否为沿用值
+function mTargetResolved(mk, mid) {
+  const T = state.team;
+  const own = mTarget(mk, mid);
+  if (own !== '') return { val: own, from: mk, carried: false };
+  const keys = Object.keys(T.months || {}).filter(x => x !== mk && monthHasTargets(x)).sort();
+  const back = keys.filter(x => x < mk).reverse();   // 先往前（上月 / 更早）
+  for (const x of back) { const v = mTarget(x, mid); if (v !== '') return { val: v, from: x, carried: true }; }
+  const fwd = keys.filter(x => x > mk);              // 再往后（预先填好的下月目标）
+  for (const x of fwd) { const v = mTarget(x, mid); if (v !== '') return { val: v, from: x, carried: true }; }
+  const m = T.members.find(x => x.id === mid);
+  if (m && m.personalTarget) return { val: m.personalTarget, from: '', carried: true };
+  return { val: '', from: '', carried: false };
+}
 // 该成员在指定月份的个人目标（数值，未设置为 null）
-function memberTarget(mid, mk) { const n = parseFloat(mTarget(mk || curMonth(), mid)); return isNaN(n) ? null : n; }
+function memberTarget(mid, mk) {
+  const r = mTargetResolved(mk || curMonth(), mid);
+  const n = parseFloat(r.val);
+  return isNaN(n) ? null : n;
+}
 // 小小组达标判定：全员达标 meet / 全员不达标 allFail
 function subGroupMeet(sgId, mk, rateMap) {
   const ms = state.team.members.filter(m => m.subGroupId === sgId);
@@ -977,13 +1001,14 @@ function renderWeeklyForm(pk) {
     mems.forEach(m => {
       const d = (wk.data || {})[m.id] || {};
       const rate = rateMap[m.id];
-      const tgt = memberTarget(m.id, mk);
+      const ti = mTargetResolved(mk, m.id);
+      const tgt = isNaN(parseFloat(ti.val)) ? null : parseFloat(ti.val);
       const errs = parseInt(d.seriousErrors) || 0;
       const personalHit = (rate != null && tgt != null) ? rate >= tgt : false;
       const score = calcWeekScore(personalHit, j.meet, errs);
       rows.push(`<tr class="wk-row ${color}">
         <td class="wk-mem">${esc(m.name)}</td>
-        <td class="wk-tgt">${tgt != null ? tgt + '%' : '<span class="wk-na">未设目标</span>'}</td>
+        <td class="wk-tgt"><span class="wk-tgt-wrap"><input type="text" inputmode="decimal" class="wk-tgt-in" data-mid="${m.id}" data-mk="${mk}" value="${esc(ti.val)}" placeholder="未设" title="与「成员管理」的 ${esc(monthLabel(mk))} 目标联动，改完自动同步"> %<i class="wk-carry" style="display:${ti.carried && ti.val !== '' ? '' : 'none'}" title="该月未单独设置，沿用 ${esc(ti.from ? monthLabel(ti.from) : '历史数据')} 的目标">↩</i></span></td>
         <td><input type="text" inputmode="decimal" class="field wk-rate" data-mid="${m.id}" value="${d.completionRate !== undefined && d.completionRate !== '' ? esc(d.completionRate) : ''}" placeholder="—" style="width:62px;text-align:center"> %</td>
         <td><input type="text" inputmode="decimal" class="field wk-err" data-mid="${m.id}" value="${d.seriousErrors !== undefined && d.seriousErrors !== '' ? esc(d.seriousErrors) : ''}" placeholder="0" style="width:50px;text-align:center"></td>
         <td class="wk-flag" data-flag="p-${m.id}">${flagBadge(rate == null || tgt == null ? null : personalHit)}</td>
@@ -996,9 +1021,12 @@ function renderWeeklyForm(pk) {
     });
   });
 
-  box.innerHTML = `<div class="wk-scroll"><table class="team-table wk-table">
+  const monthEmpty = !monthHasTargets(mk);
+  const warn = monthEmpty ? `<div class="wk-warn">⚠️ <b>${esc(monthLabel(mk))}</b> 还没设置成员目标，下表「个人目标」为其他月份的沿用值（带 <i class="wk-carry">↩</i>）。<button class="btn xs" data-act="team-goto-members-month" data-mk="${mk}">去「成员管理」设置 ${esc(monthLabel(mk))} 目标 →</button></div>` : '';
+
+  box.innerHTML = `${warn}<div class="wk-scroll"><table class="team-table wk-table">
     <thead><tr>
-      <th style="min-width:120px">成员</th><th style="width:74px">个人目标</th><th style="width:110px">完成率</th><th style="width:74px">严错数</th>
+      <th style="min-width:120px">成员</th><th style="width:86px">个人目标</th><th style="width:110px">完成率</th><th style="width:74px">严错数</th>
       <th style="width:74px">个人达标</th><th style="width:82px">小小组达标</th><th style="width:64px">无严错</th><th style="width:74px">本周得分</th><th style="width:36px"></th>
     </tr></thead>
     <tbody>${rows.join('')}</tbody>
@@ -1009,7 +1037,7 @@ function renderWeeklyForm(pk) {
       <td></td>
     </tr></tfoot>
   </table></div>
-  <div class="wk-tipbox">💡 「个人达标 / 小小组达标 / 无严错」由系统按 <b>加减分规则</b> 自动判定，本周得分 = 达标项加分 − 严错扣分；每月项目点行末 <b>⋯</b> 展开填写。</div>
+  <div class="wk-tipbox">💡 「个人目标」直接取自 <b>成员管理</b> 里 ${esc(monthLabel(mk))} 的目标，也可以在这里直接改（改完自动同步回成员管理）。「个人达标 / 小小组达标 / 无严错」由系统按 <b>加减分规则</b> 自动判定，本周得分 = 达标项加分 − 严错扣分；每月项目点行末 <b>⋯</b> 展开填写。</div>
   <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn primary" data-act="team-save-period" data-k="${pk}">💾 保存本周数据</button>
     <button class="btn yellow sm" data-act="team-show-rules">📋 查看加减分规则</button>
@@ -1127,6 +1155,19 @@ function commitWeekInput(input) {
   wk.data[mid][fld] = clean;
   if (input.value !== clean) input.value = clean;
   save();
+}
+// 周面板里直接改「个人目标」→ 同步写回该月的 targets（与「成员管理」同一份数据）
+function commitWeekTarget(input) {
+  const mk = input.dataset.mk || curMonth();
+  const mid = input.dataset.mid;
+  if (!mid) return;
+  const clean = (input.value || '').trim().replace(/[^\d.]/g, '');
+  if (input.value !== clean) input.value = clean;
+  const mo = ensureMonth(mk);
+  if (clean === '') delete mo.targets[mid]; else mo.targets[mid] = clean;
+  save();
+  renderTeam();          // 整块刷新：同步「成员管理」、更新达标判定与得分、去掉沿用标记
+  toast(`✅ 已同步为「成员管理」${monthLabel(mk)} 的目标`);
 }
 // 失焦即落库：单个月度项
 function commitMonthExtra(mid, mk, fld) {
@@ -1901,6 +1942,14 @@ $('#view').addEventListener('click', e => {
     renderTeam();
     toast('✅ 已保存 ' + esc(m.name) + ' 目标: ' + (newTarget || '(空)') + '%');
   }
+  else if (act === 'team-goto-members-month') {
+    const mk = el.dataset.mk || curMonth();
+    ensureMonth(mk);
+    state.team.currentMonth = mk;
+    state.team.activeTab = 'members';
+    save(); renderTeam();
+    toast(`已切到「成员管理」的 ${monthLabel(mk)}，填完点「保存 ${monthLabel(mk)} 目标」`);
+  }
   else if (act === 'team-create-period') {
     const sEl = $('#wkNewStart'), eEl = $('#wkNewEnd');
     const s = (sEl ? sEl.value : '') || mondayStr();
@@ -2047,6 +2096,11 @@ $('#view').addEventListener('change', e => {
   if (e.target.classList && (e.target.classList.contains('wk-mx') || e.target.classList.contains('wk-mxc') || e.target.classList.contains('wk-mxs'))) {
     recalcMonthExtraUI(e.target.dataset.mid, e.target.dataset.mk);
     commitMonthExtra(e.target.dataset.mid, e.target.dataset.mk, e.target.dataset.fld);
+    return;
+  }
+  // 周面板改「个人目标」→ 同步回成员管理
+  if (e.target.classList && e.target.classList.contains('wk-tgt-in')) {
+    commitWeekTarget(e.target);
     return;
   }
   // 完成率 / 严错数 失焦即自动落库（避免忘记点保存导致丢数据）
