@@ -523,3 +523,18 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .wk-table tr.wk-row.tm-sg-b td.wk-score{background:#EFF9FF}
 .wk-table tr.wk-row.tm-sg-c td.wk-score{background:#EFFBF4}
 .wk-table tr.wk-row.tm-sg-d td.wk-score{background:#F7F0FF}
+
+/* ---- 周数据：个人目标联动（可就地编辑，与成员管理同一份数据） ---- */
+.wk-tgt-wrap{display:inline-flex;align-items:center;gap:1px;justify-content:center}
+.wk-tgt-in{width:54px;text-align:center;font-family:var(--font);font-size:12.5px;font-weight:700;
+  color:var(--ink);background:transparent;border:none;border-bottom:1px dashed var(--ink-faint);
+  border-radius:0;padding:2px 1px;outline:none;transition:border-color .15s,background .15s}
+.wk-tgt-in:hover{border-bottom-color:var(--ink-soft)}
+.wk-tgt-in:focus{border-bottom:1.5px solid var(--green-400);background:#fff}
+.wk-tgt-in::placeholder{color:var(--ink-faint);font-weight:400}
+.wk-carry{font-style:normal;font-size:11px;line-height:1;color:#E8A33D;cursor:help;margin-left:1px}
+.wk-warn{margin:0 0 10px;padding:9px 12px;border-radius:10px;background:var(--yellow-50);
+  border:1px solid var(--yellow-200);color:#8A6320;font-size:12.5px;line-height:1.5;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wk-warn .btn.xs{background:#fff;border:1px solid var(--yellow-300);color:#8A6320;padding:3px 9px;font-size:12px;border-radius:9px}
+.wk-warn .btn.xs:hover{background:var(--yellow-100)}
