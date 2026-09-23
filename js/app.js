@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260920e'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260923a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1001,7 +1001,8 @@ function renderTeamWeekly(v) {
     </div>
     <div class="tm-legend">${allSubGroupList().map((o, i) => `<span class="tm-lg"><i class="tm-dot tm-dot-${SG_COLOR_KEYS[i % SG_COLOR_KEYS.length]}"></i>${esc(o.sg.name)}</span>`).join('')}</div>
     <div id="weeklyForm"></div>
-  </div>`;
+  </div>
+  ${renderWeekHistory(sel)}`;
   renderWeeklyForm(sel);
 }
 
@@ -1069,6 +1070,135 @@ function renderWeeklyForm(pk) {
     <button class="btn primary" data-act="team-save-period" data-k="${pk}">💾 保存本周数据</button>
     <button class="btn yellow sm" data-act="team-show-rules">📋 查看加减分规则</button>
   </div>`;
+}
+
+// ===== 历史日期区间积分记录（折叠归档） =====
+// 全部由 weeks[pk].data 实时推导，不额外落库 —— 保存过 = 有记录，不会出现"数据对不上"
+// 该区间是否已录入过数据（任一成员填了完成率或严错数）
+function periodHasData(pk) {
+  const d = (state.team.weeks[pk] || {}).data || {};
+  return Object.keys(d).some(mid => {
+    const r = d[mid] || {};
+    return (r.completionRate !== undefined && r.completionRate !== '')
+        || (r.seriousErrors !== undefined && r.seriousErrors !== '' && parseInt(r.seriousErrors) > 0);
+  });
+}
+// 某区间的汇总：overall = 全员合计；byMember = 每人得分；bySG = 每个小小组达标情况
+function periodSummary(pk) {
+  const T = state.team;
+  const wk = T.weeks[pk] || {};
+  const mk = monthOfPeriod(wk) || curMonth();
+  const rateMap = {};
+  T.members.forEach(m => {
+    const r = parseFloat(((wk.data || {})[m.id] || {}).completionRate);
+    rateMap[m.id] = isNaN(r) ? null : r;
+  });
+  const byMember = {}, bySG = {};
+  let overall = 0, filled = 0;
+  allSubGroupList().forEach(({ sg }) => {
+    const j = subGroupMeet(sg.id, mk, rateMap);
+    const mems = T.members.filter(m => m.subGroupId === sg.id);
+    let sum = 0;
+    mems.forEach(m => {
+      const s = weekScoreOf(pk, m.id);
+      byMember[m.id] = s;
+      sum += s;
+      const d = ((wk.data || {})[m.id] || {});
+      if (d.completionRate !== undefined && d.completionRate !== '') filled++;
+    });
+    bySG[sg.id] = { ...j, sum: Math.round(sum * 10) / 10, count: mems.length };
+    overall += sum;
+  });
+  return { wk, mk, overall: Math.round(overall * 10) / 10, byMember, bySG, filled };
+}
+// 单个区间卡片内部：各组小计 + 逐人明细表
+function periodBlockHtml(pk) {
+  const T = state.team;
+  const s = periodSummary(pk);
+  const cmap = sgColorMap();
+  let groupsHtml = '', rowsHtml = '';
+  allSubGroupList().forEach(({ sg }) => {
+    const color = cmap[sg.id] || 'tm-sg-a';
+    const g = s.bySG[sg.id] || {};
+    const judge = g.judged
+      ? (g.meet ? '<span class="wk-badge wk-badge-yes">✓</span>' : '<span class="wk-badge wk-badge-no">✕</span>')
+      : '<span class="wk-badge wk-badge-na">—</span>';
+    groupsHtml += `<span class="tm-lg"><i class="tm-dot tm-dot-${SG_COLOR_KEYS[allSubGroupList().findIndex(o => o.sg.id === sg.id) % SG_COLOR_KEYS.length]}"></i>${esc(sg.name)}
+      <b class="wk-hist-sgsum">${g.sum != null ? g.sum : 0}</b>
+      <span class="wk-hist-sgmeta">目标 ${g.sgt != null ? g.sgt.toFixed(2) + '%' : '—'} · 组均 ${g.avg != null ? g.avg.toFixed(2) + '%' : '—'} · ${judge}</span></span>`;
+    s.mk;
+    const mems = T.members.filter(m => m.subGroupId === sg.id);
+    if (!mems.length) return;
+    rowsHtml += `<tr class="wk-hist-sghead ${color}"><td colspan="6">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span>
+      <span class="wk-sg-judge">小小组达标：${judge}</span></td></tr>`;
+    mems.forEach(m => {
+      const d = ((s.wk.data || {})[m.id] || {});
+      const ti = mTargetResolved(s.mk, m.id);
+      const tgt = isNaN(parseFloat(ti.val)) ? null : parseFloat(ti.val);
+      const rate = d.completionRate !== undefined && d.completionRate !== '' ? d.completionRate : null;
+      const errs = parseInt(d.seriousErrors) || 0;
+      const personalHit = (rate != null && tgt != null) ? parseFloat(rate) >= tgt : false;
+      const sc = s.byMember[m.id] != null ? s.byMember[m.id] : 0;
+      rowsHtml += `<tr class="wk-row ${color}">
+        <td class="wk-mem">${esc(m.name)}</td>
+        <td class="wk-hist-num">${tgt != null ? tgt + '%' : '<span class="wk-na">未设</span>'}</td>
+        <td class="wk-hist-num">${rate != null ? esc(rate) + '%' : '<span class="wk-na">未填</span>'}</td>
+        <td class="wk-hist-num">${errs}</td>
+        <td class="wk-flag">${rate == null || tgt == null ? flagBadge(null) : flagBadge(personalHit)}</td>
+        <td class="wk-score ${sc >= 0 ? 'score-pos' : 'score-neg'}"><b>${sc}</b></td>
+      </tr>`;
+    });
+  });
+  return `<div class="tm-legend wk-hist-legend">${groupsHtml}</div>
+    <div class="wk-scroll"><table class="team-table wk-table wk-hist-table">
+      <thead><tr><th style="min-width:120px">成员</th><th style="width:92px">个人目标</th><th style="width:100px">完成率</th>
+        <th style="width:70px">严错数</th><th style="width:80px">个人达标</th><th style="width:80px">本周得分</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot><tr class="wk-tfoot"><td colspan="5" style="text-align:right">区间全员得分合计</td>
+        <td class="wk-score ${s.overall >= 0 ? 'score-pos' : 'score-neg'}"><b>${s.overall}</b></td></tr></tfoot>
+    </table></div>`;
+}
+// 历史区间列表（默认全部折叠）
+function renderWeekHistory(tk) {
+  const T = state.team;
+  const all = periodList();
+  if (!all.length) return '';
+  if (!T._wkHistOpen) T._wkHistOpen = {};
+  const filledKeys = all.filter(periodHasData);
+  const emptyKeys = all.filter(k => !periodHasData(k));
+  const card = (k, dim) => {
+    const s = periodSummary(k);
+    const open = !!T._wkHistOpen[k];
+    const isCur = k === tk;
+    return `<div class="tm-month-fold wk-hist-fold ${open ? 'open' : ''}${dim ? ' wk-hist-dim' : ''}">
+      <div class="tm-month-fold-head" data-act="wk-hist-toggle" data-k="${k}">
+        <span class="tm-fold-hit"><i class="tm-fold-arrow">${open ? '▾' : '▸'}</i>
+          <span class="tm-fold-name">${esc(weekLabel(s.wk))}</span>
+          ${isCur ? '<span class="tm-fold-tag">当前查看</span>' : ''}
+          ${fillWeekTag(s)}
+        </span>
+        <span class="tm-fold-meta">全员合计 <b>${s.overall}</b> 分</span>
+        <button class="btn sm ghost" data-act="wk-hist-togo" data-k="${k}" title="切到该区间">✎ 编辑</button>
+        <button class="btn sm ghost" data-act="team-del-period" data-k="${k}" style="color:var(--danger)" title="删除该区间">🗑</button>
+      </div>
+      ${open ? `<div class="tm-month-fold-body">${periodBlockHtml(k)}</div>` : ''}
+    </div>`;
+  };
+  const fillWeekTag = s => {
+    const n = Object.keys(s.byMember).filter(mid => {
+      const d = ((s.wk.data || {})[mid] || {});
+      return d.completionRate !== undefined && d.completionRate !== '';
+    }).length;
+    return n ? `<span class="wk-hist-tag">${n} 人已填</span>` : '<span class="wk-hist-tag wk-hist-tag-empty">未录入</span>';
+  };
+  return `<div class="tm-hist-title">📁 历史周记录（点击展开查看该区间的明细与积分）</div>
+    <div class="tm-hist-bar">
+      <span class="tm-fold-meta">已归档 <b>${filledKeys.length}</b> 个区间${emptyKeys.length ? ` · ${emptyKeys.length} 个待录入` : ''}</span>
+      <button class="btn sm ghost" data-act="wk-hist-all" data-open="1">全部展开</button>
+      <button class="btn sm ghost" data-act="wk-hist-all" data-open="0">全部收起</button>
+    </div>
+    ${filledKeys.map(k => card(k, false)).join('')}
+    ${emptyKeys.length ? `<div class="wk-hist-subtitle">未录入数据的区间</div>${emptyKeys.map(k => card(k, true)).join('')}` : ''}`;
 }
 
 // 月度加分/扣分项展开面板
@@ -2032,7 +2162,27 @@ $('#view').addEventListener('click', e => {
       const x = monthExtras(mk, mid);
       x[fld] = i.type === 'checkbox' ? i.checked : (i.value || '').trim();
     });
-    save(); renderTeam(); toast(`✅ ${weekLabel(wk)} 数据已保存`);
+    save(); renderTeam(); toast(`✅ ${weekLabel(wk)} 数据已保存，已归档到下方「历史周记录」`);
+  }
+  else if (act === 'wk-hist-toggle') {
+    const k = el.dataset.k;
+    if (!state.team._wkHistOpen) state.team._wkHistOpen = {};
+    state.team._wkHistOpen[k] = !state.team._wkHistOpen[k];
+    save(); renderTeam();
+  }
+  else if (act === 'wk-hist-all') {
+    const open = el.dataset.open === '1';
+    state.team._wkHistOpen = {};
+    if (open) periodList().forEach(k => { state.team._wkHistOpen[k] = true; });
+    save(); renderTeam();
+  }
+  else if (act === 'wk-hist-togo') {
+    const k = el.dataset.k;
+    if (!state.team.weeks[k]) { toast('区间不存在'); return; }
+    state.team._selectedPeriod = k;
+    state.team.activeTab = 'weekly';
+    save(); renderTeam();
+    toast(`已切到 ${weekLabel(state.team.weeks[k])}`);
   }
   else if (act === 'team-show-rules') { state.team.activeTab = 'rules'; save(); renderTeam(); }
   else if (act === 'report-open') openReport();
@@ -2129,13 +2279,13 @@ function refreshMemberAverages(input) {
     const v = ids.map(valOf).filter(n => !isNaN(n));
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
   };
-  // 本小小组
-  const sgIds = T.members.filter(x => x.subGroupId === m.subGroupId).map(x => x.id);
-  const sgAvg = avgOf(sgIds);
-  const cell = table.querySelector(`.tm-td-sgtarget[data-sg="${m.subGroupId}"]`);
-  if (cell) cell.innerHTML = sgAvg != null
-    ? `<span class="tm-sgavg" title="小小组完成率目标 = 组内 ${sgIds.filter(id => !isNaN(valOf(id))).length} 位成员个人目标的均值（自动计算）">${pct(sgAvg)}</span>`
-    : '<span style="color:var(--ink-faint)">—</span>';
+    // 本小小组
+    const sgIds = T.members.filter(x => x.subGroupId === m.subGroupId).map(x => x.id);
+    const sgAvg = avgOf(sgIds);
+    const cell = table.querySelector(`.tm-td-sgtarget[data-sg="${m.subGroupId}"]`);
+    if (cell) cell.innerHTML = sgAvg != null
+      ? `<span class="tm-sgavg" title="小小组完成率目标 = 组内 ${sgIds.filter(id => !isNaN(valOf(id))).length} 位成员个人目标的均值（自动计算）">${pct(sgAvg)}</span>`
+      : '<span style="color:var(--ink-faint)">—</span>';
   // 本大组（入职年限总目标）
   const gIds = T.members.filter(x => x.groupId === m.groupId).map(x => x.id);
   const gAvg = avgOf(gIds);
