@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260924a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260924b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1232,7 +1232,84 @@ function renderWeekHistory(tk) {
     ${emptyKeys.map(k => card(k, true)).join('')}`;
 }
 
-// 月度加分/扣分项展开面板
+// 某成员某月「月度项」的逐条明细：用于积分看板点开查看加减分构成
+// 返回 { items:[{label, pts, tag}], auto:[...], total }
+function monthExtraBreakdown(member, mk, klist) {
+  const x = monthExtras(mk, member.id) || {};
+  const ks = klist || resolveMonthWeeks(mk);
+  const errSum = monthErrSum(mk, member.id, ks);
+  const hasData = hasWeekData(mk, member.id, ks);
+  const sj = subGroupMeet(member.subGroupId, mk, latestRateMap(mk, ks));
+  const items = [];
+  const auto = [];
+
+  // ---- 加分 ----
+  const rank = parseInt(x.attendanceRank);
+  if (rank === 1) items.push({ label: '应出勤组内 Top 1', pts: 3, tag: '加' });
+  else if (rank === 2) items.push({ label: '应出勤组内 Top 2', pts: 2, tag: '加' });
+  else if (rank === 3) items.push({ label: '应出勤组内 Top 3', pts: 1, tag: '加' });
+  if (errSum === 0 && hasData) items.push({ label: '无严错', pts: 2, tag: '加' });
+
+  const numMap = [
+    ['bonusActivity', '组织技能分享 / 座谈会等线下活动', 3],
+    ['bonusInitiative', '主动接收紧急任务 / 主动补位 / 建设性建议', 2],
+    ['bonusOnlineShare', '线上 case / tips 分享', 1],
+    ['bonusEventOwner', '“周内大事件”负责人', 2],
+    ['bonusTea', '组织下午茶', 1],
+    ['bonusQuiz', '小组答题', 1],
+    ['bonusTrainer', '科室培训讲师', 3],
+  ];
+  numMap.forEach(([k, label, mult]) => {
+    const n = parseFloat(x[k]) || 0;
+    if (n) items.push({ label, pts: Math.round(n * mult * 10) / 10, tag: '加', detail: `${n} × ${mult}` });
+  });
+  const deptOther = parseFloat(x.bonusDeptOther) || 0;
+  if (deptOther) items.push({ label: '科室其他活动', pts: Math.round(deptOther * 10) / 10, tag: '加' });
+
+  // ---- 扣分 ----
+  if (errSum >= 3) items.push({ label: '严错 ≥ 3 个', pts: -2, tag: '扣', detail: `本月 ${errSum} 个` });
+  if (x.deductQualityRule) items.push({ label: '触及当月质量目标条例', pts: -1, tag: '扣' });
+  if (x.deductDragGroup) items.push({ label: '完成率低致小组不达标', pts: -2, tag: '扣' });
+  const deductMap = [
+    ['deductPending', 'pending / 返稿 / 跳 QC', 0.5],
+    ['deductLow', 'Low 等级违规', 1],
+    ['deductMed', 'Medium 等级违规', 2],
+    ['deductHigh', 'High 等级违规', 3],
+  ];
+  deductMap.forEach(([k, label, mult]) => {
+    const n = parseFloat(x[k]) || 0;
+    if (n) items.push({ label, pts: -(Math.round(n * mult * 10) / 10), tag: '扣', detail: `${n} × ${mult}` });
+  });
+  if (sj.allFail) items.push({ label: '小小组成员完成率均不达标', pts: -2, tag: '扣' });
+
+  // ---- 自动判定速览（无论加不加分都展示，便于核对） ----
+  auto.push(`本月严错合计 <b>${errSum}</b> 个`);
+  auto.push(`无严错 +2 ${errSum === 0 && hasData ? '<b class="wk-ok">已加</b>' : '<span class="wk-na">未加</span>'}`);
+  auto.push(`严错≥3 −2 ${errSum >= 3 ? '<b class="wk-bad">已扣</b>' : '<span class="wk-na">未扣</span>'}`);
+  auto.push(`小小组均不达标 −2 ${sj.allFail ? '<b class="wk-bad">已扣</b>' : '<span class="wk-na">未扣</span>'}`);
+
+  const total = Math.round(items.reduce((a, it) => a + it.pts, 0) * 10) / 10;
+  return { items, auto, total };
+}
+// 月度项明细行（点开 月度项 数字后在该行下方展开）
+function monthExtraDetailRow(m, mk, klist, color, colspan) {
+  const b = monthExtraBreakdown(m, mk, klist);
+  const lines = b.items.length
+    ? b.items.map(it => `<span class="sb-mx-item ${it.pts >= 0 ? 'is-plus' : 'is-minus'}">
+        <span class="sb-mx-label">${esc(it.label)}</span>
+        ${it.detail ? `<span class="sb-mx-detail">${esc(it.detail)}</span>` : ''}
+        <span class="sb-mx-pts">${it.pts > 0 ? '+' : ''}${it.pts}</span></span>`).join('')
+    : `<span class="sb-mx-empty">本月暂无月度项加减分</span>`;
+  return `<tr class="sb-mx-detail-row ${color}"><td colspan="${colspan}">
+    <div class="sb-mx-box">
+      <div class="sb-mx-head">📆 ${esc(m.name)} · ${esc(monthLabel(mk))} 月度项明细</div>
+      <div class="sb-mx-list">${lines}</div>
+      <div class="sb-mx-auto"><span class="wk-auto-tag">自动判定</span>${b.auto.join(' · ')}</div>
+      <div class="sb-mx-total">月度项小计 <b class="${b.total >= 0 ? 'score-pos' : 'score-neg'}">${b.total}</b> 分</div>
+    </div>
+  </td></tr>`;
+}
+// 月度加分/扣分项展开面板（周数据录入里逐行展开的编辑区）
 function monthlyDetailHtml(m, mk) {
   const x = monthExtras(mk, m.id);
   const errSum = monthErrSum(mk, m.id);
@@ -1458,17 +1535,27 @@ function renderSBContent(mk) {
   </div>`;
 
   // 各周明细（按小小组上色）
-  html += `<h3 style="margin:16px 0 10px;font-size:15px">📊 各周积分明细</h3>
+  const mxAny = Object.keys(T._sbMxOpen || {}).some(k => T._sbMxOpen[k]);
+  html += `<div class="sb-weekhead">
+      <h3 style="margin:0;font-size:15px">📊 各周积分明细</h3>
+      <span class="sb-weekhead-acts">
+        <button type="button" class="btn xs" data-act="sb-mx-all" data-mk="${esc(mk)}" data-open="1">展开全部月度项</button>
+        <button type="button" class="btn xs" data-act="sb-mx-all" data-mk="${esc(mk)}" data-open="0">收起</button>
+      </span>
+    </div>
+    <p class="sb-mxhint">点「月度项」那一格的数字，可以展开看ta这个月的加分 / 扣分是怎么来的。</p>
     <div class="card card-soft"><div style="overflow-x:auto">
     <table class="team-table">
-      <thead><tr><th>成员</th>${monthWeeks.map(k => `<th>${esc(weekLabel(T.weeks[k]))}</th>`).join('')}<th>月度项</th><th>月合计</th></tr></thead>
+      <thead><tr><th>成员</th>${monthWeeks.map(k => `<th>${esc(weekLabel(T.weeks[k]))}</th>`).join('')}<th class="${mxAny ? 'sb-th-on' : ''}">月度项</th><th>月合计</th></tr></thead>
       <tbody>`;
   const cmap = sgColorMap();
+  const colspan = monthWeeks.length + 3;
+  if (!T._sbMxOpen) T._sbMxOpen = {};
   allSubGroupList().forEach(({ sg }) => {
     const color = cmap[sg.id] || 'tm-sg-a';
     const mems = T.members.filter(m => m.subGroupId === sg.id);
     if (!mems.length) return;
-    html += `<tr class="wk-sg-head ${color}"><td colspan="${monthWeeks.length + 3}">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span></td></tr>`;
+    html += `<tr class="wk-sg-head ${color}"><td colspan="${colspan}">${esc(sg.name)}<span class="wk-sg-cnt">${mems.length} 人</span></td></tr>`;
     mems.forEach(m => {
       html += `<tr class="wk-row ${color}"><td class="wk-mem">${esc(m.name)}</td>`;
       let wsum = 0;
@@ -1482,8 +1569,12 @@ function renderSBContent(mk) {
       });
       const extra = calcMonthExtra(m, mk, monthWeeks);
       const total = Math.round((wsum + extra) * 10) / 10;
-      html += `<td class="${extra >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center">${extra}</td>
+      const mxOpen = !!T._sbMxOpen[m.id];
+      html += `<td class="sb-mx-cell ${extra >= 0 ? 'score-pos' : 'score-neg'}">
+          <button type="button" class="sb-mx-btn ${mxOpen ? 'on' : ''}" data-act="sb-mx-toggle" data-mid="${m.id}" data-mk="${esc(mk)}"
+            title="查看 ${esc(m.name)} 的月度项加减分明细">${extra}<i class="sb-mx-caret">${mxOpen ? '▾' : '▸'}</i></button></td>
         <td class="${total >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center;font-weight:800">${total}</td></tr>`;
+      if (mxOpen) html += monthExtraDetailRow(m, mk, monthWeeks, color, colspan);
     });
   });
   html += `</tbody></table></div></div>`;
@@ -2435,9 +2526,25 @@ $('#view').addEventListener('change', e => {
     if (g) { e.target.innerHTML = g.subGroups.map(sg => `<option value="${sg.id}" ${sg.id===e.target.value?'selected':''}>${esc(sg.name)}</option>`).join(''); }
   }
 });
-/* 积分看板：周选择器的「全选本月」/「恢复默认」按钮（click，不能放在 change 里） */
+/* 积分看板：周选择器的「全选本月」/「恢复默认」按钮 + 月度项明细展开（click，不能放在 change 里） */
 $('#view').addEventListener('click', e => {
   const act = e.target.dataset && e.target.dataset.act;
+  if (act === 'sb-mx-toggle') {
+    const mid = e.target.dataset.mid, mk = e.target.dataset.mk;
+    if (!mid || !mk) return;
+    if (!state.team._sbMxOpen) state.team._sbMxOpen = {};
+    state.team._sbMxOpen[mid] = !state.team._sbMxOpen[mid];
+    renderSBContent(mk);
+    return;
+  }
+  if (act === 'sb-mx-all') {
+    const mk = e.target.dataset.mk; if (!mk) return;
+    const open = e.target.dataset.open === '1';
+    state.team._sbMxOpen = {};
+    if (open) state.team.members.forEach(m => { state.team._sbMxOpen[m.id] = true; });
+    renderSBContent(mk);
+    return;
+  }
   if (act !== 'sb-week-all' && act !== 'sb-week-auto') return;
   const mk = e.target.dataset.k; if (!mk) return;
   if (act === 'sb-week-all') {
