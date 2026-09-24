@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260923a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260923b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -822,6 +822,27 @@ function periodList() { return Object.keys(state.team.weeks || {}).sort().revers
 function weekLabel(w) { return w && w.start ? `${w.start} ~ ${w.end || w.start}` : ''; }
 function monthOfPeriod(w) { return w && w.start ? w.start.slice(0, 7) : ''; }
 function periodsInMonth(mk) { return periodList().filter(k => monthOfPeriod(state.team.weeks[k]) === mk).sort(); }
+// 积分看板：某月实际参与核算的周（可手动勾选，解决跨月周的归属问题）
+// 手动选择存 team.sbWeeks[YYYY-MM] = [weekKey, ...]；未设置时默认沿用「起始日期所在月」
+function resolveMonthWeeks(mk) {
+  const T = state.team;
+  const manual = T.sbWeeks && T.sbWeeks[mk];
+  if (Array.isArray(manual)) return manual.filter(k => T.weeks[k]).slice().sort();
+  return periodsInMonth(mk);
+}
+function setMonthWeeks(mk, list) {
+  const T = state.team; if (!T.sbWeeks) T.sbWeeks = {};
+  T.sbWeeks[mk] = [...new Set(list.filter(k => T.weeks[k]))].sort();
+  save();
+}
+// 所有尚未归入任何月份手动清单的「跨月周」候选：起始日期在 mk 前、结束日期落在 mk 内
+function crossMonthCandidates(mk) {
+  const T = state.team;
+  return periodList().filter(k => {
+    const w = T.weeks[k]; if (!w || !w.start || !w.end) return false;
+    return w.start.slice(0, 7) < mk && w.end.slice(0, 7) >= mk;
+  }).sort();
+}
 function mondayStr(d) { const x = d ? new Date(d) : new Date(); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return dateStrOf(x); }
 function sundayStr(d) { const x = new Date(mondayStr(d)); x.setDate(x.getDate() + 6); return dateStrOf(x); }
 function dateStrOf(x) { return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; }
@@ -919,32 +940,33 @@ function monthExtras(mk, mid) {
   return T.monthExtras[mk][mid];
 }
 // 该月某成员的严错合计
-function monthErrSum(mk, mid) {
-  return periodsInMonth(mk).reduce((a, k) => a + (parseInt((((state.team.weeks[k] || {}).data || {})[mid] || {}).seriousErrors) || 0), 0);
+function monthErrSum(mk, mid, klist) {
+  return (klist || resolveMonthWeeks(mk)).reduce((a, k) => a + (parseInt((((state.team.weeks[k] || {}).data || {})[mid] || {}).seriousErrors) || 0), 0);
 }
 // 该月是否已有任何一周数据
-function hasWeekData(mk, mid) {
-  return periodsInMonth(mk).some(k => { const d = (((state.team.weeks[k] || {}).data || {})[mid] || {}); return d.completionRate !== undefined && d.completionRate !== ''; });
+function hasWeekData(mk, mid, klist) {
+  return (klist || resolveMonthWeeks(mk)).some(k => { const d = (((state.team.weeks[k] || {}).data || {})[mid] || {}); return d.completionRate !== undefined && d.completionRate !== ''; });
 }
 // 该月最新一周的完成率映射
-function latestRateMap(mk) {
-  const ks = periodsInMonth(mk); const last = ks[ks.length - 1]; const map = {};
+function latestRateMap(mk, klist) {
+  const ks = (klist || resolveMonthWeeks(mk)).slice(); const last = ks[ks.length - 1]; const map = {};
   if (!last) return map;
   const data = (state.team.weeks[last] || {}).data || {};
   state.team.members.forEach(m => { const r = parseFloat((data[m.id] || {}).completionRate); map[m.id] = isNaN(r) ? null : r; });
   return map;
 }
 // 该成员该月的「每月」规则得分
-function calcMonthExtra(member, mk) { return calcMonthExtraFrom(monthExtras(mk, member.id), member, mk); }
+function calcMonthExtra(member, mk, klist) { return calcMonthExtraFrom(monthExtras(mk, member.id), member, mk, klist); }
 // 纯函数：给定月度项数据算分（便于输入时实时预览）
-function calcMonthExtraFrom(x, member, mk) {
+function calcMonthExtraFrom(x, member, mk, klist) {
   x = x || {};
-  const errSum = monthErrSum(mk, member.id);
+  const ks = klist || resolveMonthWeeks(mk);
+  const errSum = monthErrSum(mk, member.id, ks);
   let s = 0;
   // ---- 加分 ----
   const rank = parseInt(x.attendanceRank);
   if (rank === 1) s += 3; else if (rank === 2) s += 2; else if (rank === 3) s += 1;
-  if (errSum === 0 && hasWeekData(mk, member.id)) s += 2;      // 无严错
+  if (errSum === 0 && hasWeekData(mk, member.id, ks)) s += 2;      // 无严错
   s += (parseInt(x.bonusActivity) || 0) * 3;                   // 组织活动 ×3
   s += (parseInt(x.bonusInitiative) || 0) * 2;                 // 主动补位 ×2
   s += (parseInt(x.bonusOnlineShare) || 0) * 1;                // 线上分享 ×1
@@ -961,7 +983,7 @@ function calcMonthExtraFrom(x, member, mk) {
   s -= (parseFloat(x.deductLow) || 0) * 1;                     // Low 违规
   s -= (parseFloat(x.deductMed) || 0) * 2;                     // Medium 违规
   s -= (parseFloat(x.deductHigh) || 0) * 3;                    // High 违规
-  const sj = subGroupMeet(member.subGroupId, mk, latestRateMap(mk));
+  const sj = subGroupMeet(member.subGroupId, mk, latestRateMap(mk, ks));
   if (sj.allFail) s -= 2;                                      // 小小组成员完成率均不达标
   return Math.round(s * 10) / 10;
 }
@@ -1333,17 +1355,19 @@ function commitMonthExtra(mid, mk, fld) {
 /* ---- 积分核算引擎（基于 TEAM_RULES 自动核算） ---- */
 // 周项得分：见 weekScoreOf()；月度项得分：见 calcMonthExtra()
 // 某成员在某月的完整得分 = 该月各周得分之和 + 月度项得分
-function monthTotalOf(mid, mk) {
+function monthTotalOf(mid, mk, klist) {
   const m = state.team.members.find(x => x.id === mid); if (!m) return 0;
-  const weeksSum = periodsInMonth(mk).reduce((a, k) => a + weekScoreOf(k, mid), 0);
-  return Math.round((weeksSum + calcMonthExtra(m, mk)) * 10) / 10;
+  const ks = klist || resolveMonthWeeks(mk);
+  const weeksSum = ks.reduce((a, k) => a + weekScoreOf(k, mid), 0);
+  return Math.round((weeksSum + calcMonthExtra(m, mk, ks)) * 10) / 10;
 }
 // 兼容旧签名：按周累计（截至 upToPeriod）
 function calcMonthTotal(memberId, upToPeriod) {
   const mk = upToPeriod ? (monthOfPeriod(state.team.weeks[upToPeriod]) || curMonth()) : curMonth();
-  let total = periodsInMonth(mk).filter(k => !upToPeriod || k <= upToPeriod).reduce((a, k) => a + weekScoreOf(k, memberId), 0);
+  const ks = resolveMonthWeeks(mk);
+  let total = ks.filter(k => !upToPeriod || k <= upToPeriod).reduce((a, k) => a + weekScoreOf(k, memberId), 0);
   const m = state.team.members.find(x => x.id === memberId);
-  if (m) total += calcMonthExtra(m, mk);
+  if (m) total += calcMonthExtra(m, mk, ks);
   return Math.round(total * 10) / 10;
 }
 
@@ -1368,15 +1392,47 @@ function renderSBContent(mk) {
   const T = state.team;
   const c = $('#sbContent');
   if (!c) return;
-  const monthWeeks = periodsInMonth(mk);
+  const monthWeeks = resolveMonthWeeks(mk);
+  const manual = !!(T.sbWeeks && Array.isArray(T.sbWeeks[mk]));
 
-  if (monthWeeks.length === 0) { c.innerHTML = `<div class="empty">${esc(monthLabel(mk))} 暂无周数据，请先在「周数据录入」中创建日期区间</div>`; return; }
+  // 周选择器（跨月周归属可手动调整）
+  const autoWeeks = periodsInMonth(mk);
+  const candidates = [...new Set([...autoWeeks, ...crossMonthCandidates(mk), ...monthWeeks])].sort();
+  const chosen = new Set(monthWeeks);
+  let picker = `<div class="sb-weekpick">
+    <div class="sb-weekpick-head">
+      <span class="sb-weekpick-title">🗓 参与核算的日期区间 <i>默认取「起始日期」落在本月的周；跨月周（如 8.29~9.4）可手动勾选</i></span>
+      <span class="sb-weekpick-acts">
+        <button class="btn xs" data-act="sb-week-all" data-k="${esc(mk)}" data-open="1">全选本月</button>
+        <button class="btn xs" data-act="sb-week-auto" data-k="${esc(mk)}">恢复默认</button>
+      </span>
+    </div>`;
+  if (!candidates.length) {
+    picker += `<p class="sb-weekpick-empty">本月暂无日期区间，请先到「周数据录入」创建</p>`;
+  } else {
+    picker += `<div class="sb-week-chips">` + candidates.map(k => {
+      const w = T.weeks[k] || {};
+      const isAuto = autoWeeks.includes(k);
+      const cross = !isAuto && crossMonthCandidates(mk).includes(k);
+      return `<label class="sb-week-chip ${chosen.has(k) ? 'on' : ''} ${cross ? 'is-cross' : ''}">
+        <input type="checkbox" data-act="sb-week-toggle" data-k="${esc(mk)}" data-wk="${esc(k)}" ${chosen.has(k) ? 'checked' : ''}>
+        <span class="sb-week-chip-dot"></span>
+        <b>${esc(weekLabel(w))}</b>
+        ${cross ? `<i class="sb-week-chip-tag">跨月</i>` : ''}
+      </label>`;
+    }).join('') + `</div>`;
+    picker += `<p class="sb-weekpick-note">已选 <b>${monthWeeks.length}</b> 个区间${manual ? '（手动设置，已保存）' : '（默认：按起始日期归月）'}</p>`;
+  }
+  picker += `</div>`;
+
+  if (monthWeeks.length === 0) { c.innerHTML = picker + `<div class="empty">${esc(monthLabel(mk))} 暂无可核算的周数据，请在上方勾选日期区间，或先在「周数据录入」中创建</div>`; bindSBWeekPicker(); return; }
 
   // 月度累计排行（各周得分 + 月度项）
-  const monthlyTotals = T.members.map(m => ({ id: m.id, name: m.name, total: monthTotalOf(m.id, mk) })).sort((a, b) => b.total - a.total);
+  const monthlyTotals = T.members.map(m => ({ id: m.id, name: m.name, total: monthTotalOf(m.id, mk, monthWeeks) })).sort((a, b) => b.total - a.total);
 
-  let html = `<div class="card card-soft" style="margin-bottom:16px">
-    <h3 style="margin:0 0 10px;font-size:15px">🥇 ${esc(monthLabel(mk))} 累计积分 Top 排行 <span style="font-weight:400;color:var(--ink-faint);font-size:12px">（各周得分 + 月度项）</span></h3>
+  let html = picker;
+  html += `<div class="card card-soft" style="margin-bottom:16px">
+    <h3 style="margin:0 0 10px;font-size:15px">🥇 ${esc(monthLabel(mk))} 累计积分 Top 排行 <span style="font-weight:400;color:var(--ink-faint);font-size:12px">（所选 ${monthWeeks.length} 个区间的周得分 + 月度项）</span></h3>
     <div class="podium">`;
   monthlyTotals.forEach((m, i) => {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
@@ -1413,7 +1469,7 @@ function renderSBContent(mk) {
         const cls = typeof s === 'number' ? (s >= 0 ? 'score-pos' : 'score-neg') : '';
         html += `<td class="${cls}" style="text-align:center">${s}</td>`;
       });
-      const extra = calcMonthExtra(m, mk);
+      const extra = calcMonthExtra(m, mk, monthWeeks);
       const total = Math.round((wsum + extra) * 10) / 10;
       html += `<td class="${extra >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center">${extra}</td>
         <td class="${total >= 0 ? 'score-pos' : 'score-neg'}" style="text-align:center;font-weight:800">${total}</td></tr>`;
@@ -1422,6 +1478,21 @@ function renderSBContent(mk) {
   html += `</tbody></table></div></div>`;
 
   c.innerHTML = html;
+  bindSBWeekPicker();
+}
+// 周选择器的 checkbox 需要保留勾选态（避免重渲染后丢失视觉反馈）
+function bindSBWeekPicker() {
+  $$('.sb-week-chip input[data-act="sb-week-toggle"]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const mk = inp.dataset.k, wk = inp.dataset.wk;
+      const cur = resolveMonthWeeks(mk).slice();
+      const i = cur.indexOf(wk);
+      if (inp.checked) { if (i < 0) cur.push(wk); }
+      else if (i >= 0) cur.splice(i, 1);
+      setMonthWeeks(mk, cur);
+      renderSBContent(mk);
+    });
+  });
 }
 
 
@@ -2344,6 +2415,20 @@ $('#view').addEventListener('change', e => {
     const g = state.team.groups.find(gr => gr.id === newGid);
     if (g) { e.target.innerHTML = g.subGroups.map(sg => `<option value="${sg.id}" ${sg.id===e.target.value?'selected':''}>${esc(sg.name)}</option>`).join(''); }
   }
+});
+/* 积分看板：周选择器的「全选本月」/「恢复默认」按钮（click，不能放在 change 里） */
+$('#view').addEventListener('click', e => {
+  const act = e.target.dataset && e.target.dataset.act;
+  if (act !== 'sb-week-all' && act !== 'sb-week-auto') return;
+  const mk = e.target.dataset.k; if (!mk) return;
+  if (act === 'sb-week-all') {
+    const all = [...new Set([...periodsInMonth(mk), ...crossMonthCandidates(mk)])].sort();
+    setMonthWeeks(mk, all);
+  } else {
+    if (state.team.sbWeeks) delete state.team.sbWeeks[mk];
+    save();
+  }
+  renderSBContent(mk);
 });
 /* 周数据录入：完成率 / 严错数 输入即时重算得分；成员管理：目标输入即时刷新小小组目标 */
 $('#view').addEventListener('input', e => {
