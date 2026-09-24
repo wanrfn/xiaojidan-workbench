@@ -608,3 +608,39 @@ select.field{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xm
 .sb-weekpick-note{margin:10px 0 0;font-size:11.5px;color:var(--ink-faint)}
 .sb-weekpick-note b{font-variant-numeric:tabular-nums;color:var(--ink-soft)}
 .sb-weekpick-empty{margin:0;font-size:12px;color:var(--ink-faint)}
+
+/* ---- 积分看板：月度项加减分明细（点击展开） ---- */
+.sb-weekhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+.sb-weekhead-acts{display:flex;gap:6px;margin-left:auto}
+.sb-weekhead-acts .btn.xs{background:#fff;border:1px solid var(--green-200);color:#3E7248;
+  padding:3px 10px;font-size:12px;border-radius:999px}
+.sb-weekhead-acts .btn.xs:hover{background:var(--green-50)}
+.sb-mxhint{margin:0 0 8px;font-size:11.5px;color:var(--ink-faint)}
+.sb-mx-cell{text-align:center;padding:4px 6px!important}
+.sb-mx-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;
+  border:1px solid transparent;background:transparent;cursor:pointer;font:inherit;font-weight:700;
+  font-variant-numeric:tabular-nums;color:inherit;transition:all .15s}
+.sb-mx-btn:hover{background:var(--green-50);border-color:var(--green-200)}
+.sb-mx-btn.on{background:var(--green-50);border-color:var(--green-200);color:#3E7248}
+.sb-mx-caret{font-style:normal;font-size:9px;opacity:.7;line-height:1}
+.sb-th-on{color:#3E7248}
+tr.sb-mx-detail-row>td{padding:0!important;border-top:none!important}
+.sb-mx-box{margin:0 0 10px;padding:12px 14px;border-radius:11px;background:var(--green-50);
+  border:1px solid var(--green-100)}
+.sb-mx-head{font-size:12.5px;font-weight:800;color:#3E7248;margin-bottom:9px}
+.sb-mx-list{display:flex;flex-direction:column;gap:5px}
+.sb-mx-item{display:flex;align-items:baseline;gap:8px;font-size:12.5px;line-height:1.5;
+  padding:5px 10px;border-radius:8px;background:#fff}
+.sb-mx-item.is-plus{border-left:3px solid #5C9E6B}
+.sb-mx-item.is-minus{border-left:3px solid #D98A8A}
+.sb-mx-label{flex:1;min-width:0;color:var(--ink-soft)}
+.sb-mx-detail{font-size:11px;color:var(--ink-faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sb-mx-pts{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sb-mx-item.is-plus .sb-mx-pts{color:#3E7248}
+.sb-mx-item.is-minus .sb-mx-pts{color:#A94442}
+.sb-mx-empty{font-size:12px;color:var(--ink-faint);padding:2px 0}
+.sb-mx-auto{margin-top:9px;padding-top:9px;border-top:1px dashed var(--green-200);
+  font-size:11.5px;color:var(--ink-soft);line-height:1.7}
+.sb-mx-total{margin-top:8px;font-size:12.5px;font-weight:700;color:var(--ink-soft)}
+.sb-mx-total b{font-size:14px;font-variant-numeric:tabular-nums}
+.sb-mx-item .sb-mx-label,.sb-mx-item .sb-mx-detail,.sb-mx-item .sb-mx-pts{word-break:break-word}
