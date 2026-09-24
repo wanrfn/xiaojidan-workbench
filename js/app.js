@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260923b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260924a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -822,8 +822,8 @@ function periodList() { return Object.keys(state.team.weeks || {}).sort().revers
 function weekLabel(w) { return w && w.start ? `${w.start} ~ ${w.end || w.start}` : ''; }
 function monthOfPeriod(w) { return w && w.start ? w.start.slice(0, 7) : ''; }
 function periodsInMonth(mk) { return periodList().filter(k => monthOfPeriod(state.team.weeks[k]) === mk).sort(); }
-// 积分看板：某月实际参与核算的周（可手动勾选，解决跨月周的归属问题）
-// 手动选择存 team.sbWeeks[YYYY-MM] = [weekKey, ...]；未设置时默认沿用「起始日期所在月」
+// 积分看板：某月实际参与核算的周
+// 手动选择存 team.sbWeeks[YYYY-MM] = [weekKey, ...]；未设置时默认 = 该月「周数据录入」里已创建的区间
 function resolveMonthWeeks(mk) {
   const T = state.team;
   const manual = T.sbWeeks && T.sbWeeks[mk];
@@ -835,7 +835,8 @@ function setMonthWeeks(mk, list) {
   T.sbWeeks[mk] = [...new Set(list.filter(k => T.weeks[k]))].sort();
   save();
 }
-// 所有尚未归入任何月份手动清单的「跨月周」候选：起始日期在 mk 前、结束日期落在 mk 内
+// 跨月周候选：起始日期在 mk 之前、结束日期落在 mk 内的「已创建区间」
+// ⚠️ 只从 periodList() 里挑，绝不凭空造区间 —— 看板必须与「周数据录入」严格联动
 function crossMonthCandidates(mk) {
   const T = state.team;
   return periodList().filter(k => {
@@ -1181,6 +1182,8 @@ function periodBlockHtml(pk) {
     </table></div>`;
 }
 // 历史区间列表（默认全部折叠）
+// ⚠️ 数据源严格取 periodList()，即「周数据录入」里用户自己创建的区间；
+//    不合成、不补造任何周期。没有数据的区间会标「未录入」并可直接删掉。
 function renderWeekHistory(tk) {
   const T = state.team;
   const all = periodList();
@@ -1188,10 +1191,18 @@ function renderWeekHistory(tk) {
   if (!T._wkHistOpen) T._wkHistOpen = {};
   const filledKeys = all.filter(periodHasData);
   const emptyKeys = all.filter(k => !periodHasData(k));
+  const fillWeekTag = s => {
+    const n = Object.keys(s.byMember).filter(mid => {
+      const d = ((s.wk.data || {})[mid] || {});
+      return d.completionRate !== undefined && d.completionRate !== '';
+    }).length;
+    return n ? `<span class="wk-hist-tag">${n} 人已填</span>` : '<span class="wk-hist-tag wk-hist-tag-empty">未录入</span>';
+  };
   const card = (k, dim) => {
     const s = periodSummary(k);
     const open = !!T._wkHistOpen[k];
     const isCur = k === tk;
+    const empty = !periodHasData(k);
     return `<div class="tm-month-fold wk-hist-fold ${open ? 'open' : ''}${dim ? ' wk-hist-dim' : ''}">
       <div class="tm-month-fold-head" data-act="wk-hist-toggle" data-k="${k}">
         <span class="tm-fold-hit"><i class="tm-fold-arrow">${open ? '▾' : '▸'}</i>
@@ -1206,21 +1217,19 @@ function renderWeekHistory(tk) {
       ${open ? `<div class="tm-month-fold-body">${periodBlockHtml(k)}</div>` : ''}
     </div>`;
   };
-  const fillWeekTag = s => {
-    const n = Object.keys(s.byMember).filter(mid => {
-      const d = ((s.wk.data || {})[mid] || {});
-      return d.completionRate !== undefined && d.completionRate !== '';
-    }).length;
-    return n ? `<span class="wk-hist-tag">${n} 人已填</span>` : '<span class="wk-hist-tag wk-hist-tag-empty">未录入</span>';
-  };
-  return `<div class="tm-hist-title">📁 历史周记录（点击展开查看该区间的明细与积分）</div>
-    <div class="tm-hist-bar">
-      <span class="tm-fold-meta">已归档 <b>${filledKeys.length}</b> 个区间${emptyKeys.length ? ` · ${emptyKeys.length} 个待录入` : ''}</span>
+  const bar = `<div class="tm-hist-bar">
+      <span class="tm-fold-meta">共 <b>${all.length}</b> 个区间 · 已录入 <b>${filledKeys.length}</b> 个${emptyKeys.length ? ` · 未录入 ${emptyKeys.length} 个` : ''}</span>
       <button class="btn sm ghost" data-act="wk-hist-all" data-open="1">全部展开</button>
       <button class="btn sm ghost" data-act="wk-hist-all" data-open="0">全部收起</button>
-    </div>
+    </div>`;
+  if (!emptyKeys.length) {
+    return `<div class="tm-hist-title">📁 历史周记录（点击展开查看该区间的明细与积分）</div>${bar}
+      ${filledKeys.map(k => card(k, false)).join('')}`;
+  }
+  return `<div class="tm-hist-title">📁 历史周记录（点击展开查看该区间的明细与积分）</div>${bar}
     ${filledKeys.map(k => card(k, false)).join('')}
-    ${emptyKeys.length ? `<div class="wk-hist-subtitle">未录入数据的区间</div>${emptyKeys.map(k => card(k, true)).join('')}` : ''}`;
+    <div class="wk-hist-subtitle">未录入数据的区间（不需要留着的可以点 🗑 删掉）</div>
+    ${emptyKeys.map(k => card(k, true)).join('')}`;
 }
 
 // 月度加分/扣分项展开面板
@@ -1401,24 +1410,26 @@ function renderSBContent(mk) {
   const chosen = new Set(monthWeeks);
   let picker = `<div class="sb-weekpick">
     <div class="sb-weekpick-head">
-      <span class="sb-weekpick-title">🗓 参与核算的日期区间 <i>默认取「起始日期」落在本月的周；跨月周（如 8.29~9.4）可手动勾选</i></span>
+      <span class="sb-weekpick-title">🗓 参与核算的日期区间 <i>只列出你在「周数据录入」里已创建的区间；跨月周（如 8.29~9.4）勾上后就会算进本月</i></span>
       <span class="sb-weekpick-acts">
         <button class="btn xs" data-act="sb-week-all" data-k="${esc(mk)}" data-open="1">全选本月</button>
         <button class="btn xs" data-act="sb-week-auto" data-k="${esc(mk)}">恢复默认</button>
       </span>
     </div>`;
   if (!candidates.length) {
-    picker += `<p class="sb-weekpick-empty">本月暂无日期区间，请先到「周数据录入」创建</p>`;
+    picker += `<p class="sb-weekpick-empty">${esc(monthLabel(mk))} 还没有可核算的日期区间，请先到「周数据录入」创建</p>`;
   } else {
     picker += `<div class="sb-week-chips">` + candidates.map(k => {
       const w = T.weeks[k] || {};
       const isAuto = autoWeeks.includes(k);
       const cross = !isAuto && crossMonthCandidates(mk).includes(k);
+      const noData = !periodHasData(k);
       return `<label class="sb-week-chip ${chosen.has(k) ? 'on' : ''} ${cross ? 'is-cross' : ''}">
         <input type="checkbox" data-act="sb-week-toggle" data-k="${esc(mk)}" data-wk="${esc(k)}" ${chosen.has(k) ? 'checked' : ''}>
         <span class="sb-week-chip-dot"></span>
         <b>${esc(weekLabel(w))}</b>
         ${cross ? `<i class="sb-week-chip-tag">跨月</i>` : ''}
+        ${noData ? `<i class="sb-week-chip-nodata">未录入</i>` : ''}
       </label>`;
     }).join('') + `</div>`;
     picker += `<p class="sb-weekpick-note">已选 <b>${monthWeeks.length}</b> 个区间${manual ? '（手动设置，已保存）' : '（默认：按起始日期归月）'}</p>`;
@@ -2180,8 +2191,8 @@ $('#view').addEventListener('click', e => {
   }
   else if (act === 'team-create-period') {
     const sEl = $('#wkNewStart'), eEl = $('#wkNewEnd');
-    const s = (sEl ? sEl.value : '') || mondayStr();
-    const e = (eEl ? eEl.value : '') || sundayStr(s);
+    const s = (sEl ? sEl.value : '').trim() || mondayStr();
+    const e = (eEl ? eEl.value : '').trim() || sundayStr(s);
     if (!s) { toast('请先选择起始日期'); return; }
     if (e < s) { toast('❌ 结束日期不能早于起始日期'); return; }
     if (state.team.weeks[s]) { toast('该起始日期的区间已存在'); state.team._selectedPeriod = s; save(); renderTeam(); return; }
@@ -2194,6 +2205,14 @@ $('#view').addEventListener('click', e => {
     if (!state.team.weeks[k]) return;
     if (!confirm(`确定删除区间「${weekLabel(state.team.weeks[k])}」？\n该区间已录入的数据将一并删除。`)) return;
     delete state.team.weeks[k];
+    // 同步清掉积分看板手动选择里对这个区间的引用，避免留着"幽灵周"
+    if (state.team.sbWeeks) {
+      Object.keys(state.team.sbWeeks).forEach(mk => {
+        if (!Array.isArray(state.team.sbWeeks[mk])) return;
+        const next = state.team.sbWeeks[mk].filter(x => x !== k);
+        if (next.length) state.team.sbWeeks[mk] = next; else delete state.team.sbWeeks[mk];
+      });
+    }
     if (state.team._selectedPeriod === k) state.team._selectedPeriod = periodList()[0] || '';
     save(); renderTeam(); toast('🗑 已删除该区间');
   }
