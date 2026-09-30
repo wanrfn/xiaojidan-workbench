@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260930a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260930b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -101,15 +101,15 @@ function mdToDocx(md) {
         + `<w:t xml:space="preserve">${escXml(q[1].replace(/\*\*/g, ''))}</w:t></w:r></w:p>`);
       continue;
     }
-    // 标题：# 标题 16pt / ## 分节 14pt / ### 小标题 13pt（均加粗，比正文 12pt 大）
+    // 标题：# 标题 16pt / ## 分节 14pt / ### 范围小标题 13pt / #### 性质小标题 12.5pt（均加粗，均大于正文 12pt）
     const h = line.match(/^(#{1,4})\s+(.*)$/);
     if (h) {
       const lv = h[1].length;
-      const SZ = { 1: 32, 2: 28, 3: 26, 4: 24 }[lv] || BODY_SZ;
+      const SZ = { 1: 32, 2: 28, 3: 26, 4: 25 }[lv] || BODY_SZ;
       body.push(PARA(runsOf(h[2], SZ, true), {
         align: lv === 1 ? 'center' : null,
-        before: lv === 1 ? 0 : 260,
-        after: lv === 1 ? 220 : 130,
+        before: lv === 1 ? 0 : (lv >= 4 ? 180 : 260),
+        after: lv === 1 ? 220 : (lv >= 4 ? 100 : 130),
         line: 300,
       }));
       continue;
@@ -1708,7 +1708,7 @@ function openReport() {
   const monthStart = `${y}-${ms}-01`;
   const monthEnd = `${y}-${ms}-${String(daysInMonth(y, m - 1)).padStart(2, '0')}`;
   openModal(`<h2>📊 工作汇报</h2>
-    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，按你的模板汇总：<strong>4.本周/本期工作（科室工作 · 小组工作）</strong> → <strong>5.下周/下阶段工作计划</strong>（未完成事项自动转为计划）。可导出 Markdown 或 Word 文件。</p>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，按你的模板汇总：<strong>4.本周/本期工作</strong>（一级按 <strong>科室工作 · 小组工作</strong>，二级按工作性质如「日常管理」汇总，重复内容只列一次）→ <strong>5.下周/下阶段工作计划</strong>（未完成事项自动转为计划）。可导出 Markdown 或 Word 文件。</p>
     <div class="row" id="repTypes">
       ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
     </div>
@@ -1759,7 +1759,33 @@ function genReport(range, custom) {
   if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
   else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
   L.push('');
-  // 4. 本期工作：按「归属范围」分成 科室工作 / 小组工作…，只列内容，不列日期与范围
+  /* —— 二级汇总工具：把一批待办按「工作性质」分组，同性质下重复内容只保留一条 ——
+     归一化：去掉所有空白 + 去掉末尾标点 + 转小写（中英混排也能命中重复） */
+  const normKey = s => String(s == null ? '' : s).replace(/\s+/g, '')
+    .replace(/[。．.；;，,、！!？?~～,]+$/g, '').toLowerCase();
+  const CAT_RANK = {}; CATS.forEach((c, i) => { CAT_RANK[c] = i; });
+  const catRankOf = c => (c === '未分类' ? 999 : (CAT_RANK[c] == null ? CATS.length : CAT_RANK[c]));
+  const groupByCat = list => {
+    const map = {}, order = [], seen = new Set();
+    list.forEach(t => {
+      const txt = String(t.text == null ? '' : t.text).trim();
+      if (!txt) return;
+      const c = (t.cat && String(t.cat).trim()) ? String(t.cat).trim() : '未分类';
+      const dk = c + '\u0000' + normKey(txt);
+      if (seen.has(dk)) return;                 // 同性质下重复内容 → 只显示一条
+      seen.add(dk);
+      if (!map[c]) { map[c] = []; order.push(c); }
+      map[c].push(txt);
+    });
+    return order.sort((a, b) => catRankOf(a) - catRankOf(b) || a.localeCompare(b, 'zh'))
+      .map(c => ({ cat: c, list: map[c] }));
+  };
+  const pushCatGroups = (groups, lv) => groups.forEach(g => {
+    L.push('#'.repeat(lv || 4) + ` ${g.cat}`);
+    g.list.forEach(txt => L.push(`- ${txt}`));
+    L.push('');
+  });
+  // 4. 本期工作：一级 = 归属范围（科室/小组/部门…），二级 = 工作性质（日常管理…），只列内容，不列日期与范围
   L.push(`## 4.${hd.work}`);
   L.push('');
   const SCOPE_TITLE = { '科室': '科室工作', '组内': '小组工作', '部门': '部门工作', '外部': '外部工作' };
@@ -1769,15 +1795,18 @@ function genReport(range, custom) {
   all.forEach(t => { const s = t.scope || SCOPES[0]; (byScope[s] = byScope[s] || []).push(t); });
   scopeOrder.forEach(s => {
     const items = byScope[s]; if (!items || !items.length) return;
+    const groups = groupByCat(items);
+    if (!groups.length) return;
     L.push(`### ${SCOPE_TITLE[s] || (s + '工作')}`);
-    items.forEach(t => L.push(`- ${t.cat && t.cat !== '其他' ? t.cat + '：' : ''}${t.text}`));
     L.push('');
+    pushCatGroups(groups);
   });
-  if (!scopeOrder.some(s => (byScope[s] || []).length)) L.push('- （本期暂无记录）');
-  // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划）
+  if (!scopeOrder.some(s => (byScope[s] || []).some(t => String(t.text || '').trim()))) L.push('- （本期暂无记录）');
+  // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划，同样按工作性质二级汇总）
   L.push(`## 5.${hd.plan}`);
   L.push('');
-  if (open.length) open.forEach(t => L.push(`- ${t.cat && t.cat !== '其他' ? t.cat + '：' : ''}${t.text}`));
+  const openGroups = groupByCat(open);
+  if (openGroups.length) pushCatGroups(openGroups, 3);
   else if (all.length) L.push('- （本期任务已全部完成，可在此补充新目标）');
   else L.push('- （本期暂无计划）');
   const md = L.join('\n');
@@ -1791,7 +1820,7 @@ function genReport(range, custom) {
         <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
         <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。工作内容按「科室工作 / 小组工作」分组，逐条列出（不带日期）→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。内容先按「科室工作 / 小组工作 / 部门工作」分组，再按工作性质（如「日常管理」）二次汇总，逐条列出（不带日期），重复内容只保留一条 → 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
       <div class="report-md">${mdToPreviewHtml(md)}</div>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
