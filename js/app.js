@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260924b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20260930a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -64,23 +64,87 @@ function buildZip(files) {
   return new Blob([all], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }
 function mdToDocx(md) {
-  const escXml = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const escXml = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const BODY_SZ = 24;   // 正文 12pt；w:sz 的单位是「半磅」
+  /* 行内富文本 → 若干 <w:r>：支持 **粗体** 与 `代码`，其余原样 */
+  const runsOf = (txt, sz, forceBold) => {
+    const parts = []; let rest = String(txt); let m;
+    while ((m = rest.match(/\*\*([^*]+)\*\*|`([^`]+)`/))) {
+      if (m.index > 0) parts.push({ t: rest.slice(0, m.index), b: !!forceBold });
+      parts.push({ t: m[1] !== undefined ? m[1] : m[2], b: true });
+      rest = rest.slice(m.index + m[0].length);
+    }
+    if (rest) parts.push({ t: rest, b: !!forceBold });
+    if (!parts.length) parts.push({ t: '', b: !!forceBold });
+    return parts.map(p =>
+      `<w:r><w:rPr>${p.b ? '<w:b/>' : ''}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>`
+      + `<w:t xml:space="preserve">${escXml(p.t)}</w:t></w:r>`).join('');
+  };
+  /* 段落：统一控制对齐 / 缩进 / 段前段后 / 行距 */
+  const PARA = (runs, o) => {
+    o = o || {};
+    const pr = [];
+    if (o.align) pr.push(`<w:jc w:val="${o.align}"/>`);
+    if (o.ind != null) pr.push(`<w:ind w:left="${o.ind}"${o.hang != null ? ` w:hanging="${o.hang}"` : ''}/>`);
+    pr.push(`<w:spacing w:before="${o.before || 0}" w:after="${o.after != null ? o.after : 120}" w:line="${o.line || 300}" w:lineRule="auto"/>`);
+    return `<w:p><w:pPr>${pr.join('')}</w:pPr>${runs}</w:p>`;
+  };
   const body = [];
   for (const raw of md.split('\n')) {
     const line = raw.replace(/\s+$/, '');
-    if (!line.trim()) { body.push('<w:p/>'); continue; }
-    let text = line, bold = false, size = null;
-    const h = line.match(/^(#{1,3})\s+(.*)$/);
-    if (h) { bold = true; size = h[1].length === 1 ? 18 : h[1].length === 2 ? 15 : 13; text = h[2]; }
-    else if (/^工作汇报/.test(line) || /^【/.test(line)) { bold = true; size = 15; }
-    const cm = line.match(/^[-*]\s+\[([ x])\]\s+(.*)$/);
-    if (cm) text = '• ' + (cm[1] === 'x' ? '✅ ' : '⬜ ') + cm[2];
-    else { const m = line.match(/^[-*]\s+(.*)$/); if (m) text = '• ' + m[1]; }
-    text = text.replace(/^\[x\]\s*/, '✅ ').replace(/^\[ \]\s*/, '⬜ ').replace(/^>\s?/, '');
-    const rpr = bold ? `<w:rPr><w:b/>${size ? `<w:sz w:val="${size * 2}"/>` : ''}</w:rPr>` : '';
-    body.push(`<w:p><w:r>${rpr}<w:t xml:space="preserve">${escXml(text)}</w:t></w:r></w:p>`);
+    if (!line.trim()) { body.push('<w:p><w:pPr><w:spacing w:after="0" w:line="300" w:lineRule="auto"/></w:pPr></w:p>'); continue; }
+    // 引用行（统计区间等说明）
+    const q = line.match(/^>\s?(.*)$/);
+    if (q) {
+      body.push(`<w:p><w:pPr><w:spacing w:after="60" w:line="280" w:lineRule="auto"/><w:ind w:left="200"/></w:pPr>`
+        + `<w:r><w:rPr><w:color w:val="6B6B6B"/><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr>`
+        + `<w:t xml:space="preserve">${escXml(q[1].replace(/\*\*/g, ''))}</w:t></w:r></w:p>`);
+      continue;
+    }
+    // 标题：# 标题 16pt / ## 分节 14pt / ### 小标题 13pt（均加粗，比正文 12pt 大）
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      const lv = h[1].length;
+      const SZ = { 1: 32, 2: 28, 3: 26, 4: 24 }[lv] || BODY_SZ;
+      body.push(PARA(runsOf(h[2], SZ, true), {
+        align: lv === 1 ? 'center' : null,
+        before: lv === 1 ? 0 : 260,
+        after: lv === 1 ? 220 : 130,
+        line: 300,
+      }));
+      continue;
+    }
+    // 列表项：悬挂缩进 + 圆点，一行一条
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) {
+      let t = li[1];
+      const cm = t.match(/^\[([ x])\]\s+(.*)$/);
+      if (cm) t = (cm[1] === 'x' ? '✅ ' : '⬜ ') + cm[2];
+      body.push(PARA(runsOf('• ' + t, BODY_SZ), { ind: 430, hang: 230, after: 60, line: 300 }));
+      continue;
+    }
+    body.push(PARA(runsOf(line, BODY_SZ), {}));
   }
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}<w:sectPr/></w:body></w:document>`;
+  const sect = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+    + '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}${sect}</w:body></w:document>`;
+}
+/* Markdown → 预览用 HTML（弹窗里看得更直观，不用看到 ## ** 这类记号） */
+function mdToPreviewHtml(md) {
+  const inline = s => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  return md.split('\n').map(raw => {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) return '<div class="rp-gap"></div>';
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) return `<div class="rp-h rp-h${h[1].length}">${inline(h[2])}</div>`;
+    const q = line.match(/^>\s?(.*)$/);
+    if (q) return `<div class="rp-q">${inline(q[1])}</div>`;
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) return `<div class="rp-li">${inline(li[1])}</div>`;
+    return `<div class="rp-p">${inline(line)}</div>`;
+  }).join('');
 }
 function buildDocx(md) {
   const enc = new TextEncoder();
@@ -1644,7 +1708,7 @@ function openReport() {
   const monthStart = `${y}-${ms}-01`;
   const monthEnd = `${y}-${ms}-${String(daysInMonth(y, m - 1)).padStart(2, '0')}`;
   openModal(`<h2>📊 工作汇报</h2>
-    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，按你的模板汇总：<strong>4.本周/本期工作（组内 · 科室 · 部门）</strong> → <strong>5.下周/下阶段工作计划</strong>（未完成事项自动转为计划）。可导出 Markdown 或 Word 文件。</p>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 6px">选择区间，按你的模板汇总：<strong>4.本周/本期工作（科室工作 · 小组工作）</strong> → <strong>5.下周/下阶段工作计划</strong>（未完成事项自动转为计划）。可导出 Markdown 或 Word 文件。</p>
     <div class="row" id="repTypes">
       ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
     </div>
@@ -1685,13 +1749,6 @@ function genReport(range, custom) {
   const rate = all.length ? Math.round(done / all.length * 100) : 0;
   const open = all.filter(t => !t.done);
   const days = new Set(all.map(t => t.date)).size;
-  const catOrder = CATS;
-  const byCat = {}; catOrder.forEach(c => byCat[c] = []);
-  all.forEach(t => { const c = t.cat || '其他'; (byCat[c] = byCat[c] || []).push(t); });
-  const extraCats = Object.keys(byCat).filter(c => !catOrder.includes(c));
-  const scopeStats = {}; SCOPES.forEach(s => scopeStats[s] = 0);
-  all.forEach(t => { const s = t.scope || SCOPES[0]; scopeStats[s] = (scopeStats[s] || 0) + 1; });
-  const scopeLine = SCOPES.filter(s => scopeStats[s] > 0).map(s => `${s} ${scopeStats[s]}`).join(' · ');
 
   const L = [];
   L.push(`# ${label}`);
@@ -1699,24 +1756,30 @@ function genReport(range, custom) {
   L.push(`> 统计区间：**${r.s} 至 ${r.e}**　|　共 ${days} 天有记录`);
   L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
   L.push('');
-  if (all.length) {
-    L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
-    if (scopeLine) L.push(`归属分布：${scopeLine}。`);
-  }
+  if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
   else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
   L.push('');
-  // 4. 本周/本期工作（按「工作性质」分组，每条标注归属范围）
-  L.push(`4.${hd.work}：`);
-  catOrder.concat(extraCats).forEach(c => {
-    const items = byCat[c]; if (!items || !items.length) return;
-    L.push(`○${c}：`);
-    items.forEach(t => L.push(`- ${t.text} · ${t.scope || SCOPES[0]} · ${t.date}${t.done ? ' ✓' : '（未完成）'}`));
-  });
+  // 4. 本期工作：按「归属范围」分成 科室工作 / 小组工作…，只列内容，不列日期与范围
+  L.push(`## 4.${hd.work}`);
   L.push('');
+  const SCOPE_TITLE = { '科室': '科室工作', '组内': '小组工作', '部门': '部门工作', '外部': '外部工作' };
+  const SCOPE_ORDER = ['科室', '组内', '部门', '外部'];   // 科室工作 排在 小组工作 之前
+  const scopeOrder = [...SCOPE_ORDER, ...new Set(all.map(t => t.scope).filter(s => s && !SCOPE_ORDER.includes(s)))];
+  const byScope = {};
+  all.forEach(t => { const s = t.scope || SCOPES[0]; (byScope[s] = byScope[s] || []).push(t); });
+  scopeOrder.forEach(s => {
+    const items = byScope[s]; if (!items || !items.length) return;
+    L.push(`### ${SCOPE_TITLE[s] || (s + '工作')}`);
+    items.forEach(t => L.push(`- ${t.cat && t.cat !== '其他' ? t.cat + '：' : ''}${t.text}`));
+    L.push('');
+  });
+  if (!scopeOrder.some(s => (byScope[s] || []).length)) L.push('- （本期暂无记录）');
   // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划）
-  L.push(`5.${hd.plan}：`);
-  if (open.length) open.forEach(t => L.push(`- ${t.text}（${t.cat || '其他'} · ${t.scope || SCOPES[0]} · 原定 ${t.date}）`));
-  else L.push('- （本期任务已全部完成，可在此补充新目标）');
+  L.push(`## 5.${hd.plan}`);
+  L.push('');
+  if (open.length) open.forEach(t => L.push(`- ${t.cat && t.cat !== '其他' ? t.cat + '：' : ''}${t.text}`));
+  else if (all.length) L.push('- （本期任务已全部完成，可在此补充新目标）');
+  else L.push('- （本期暂无计划）');
   const md = L.join('\n');
 
   lastReport = { md, name: `工作汇报_${label}_${r.s}_${r.e}.md`, docxName: `工作汇报_${label}_${r.s}_${r.e}.docx` };
@@ -1728,8 +1791,8 @@ function genReport(range, custom) {
         <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
         <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。按「工作性质」分小标题，每条标注「归属范围」→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
-      <pre class="report-md" style="white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px;font-size:12px;line-height:1.6;max-height:340px;overflow:auto">${esc(md)}</pre>
+      <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。工作内容按「科室工作 / 小组工作」分组，逐条列出（不带日期）→ 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
+      <div class="report-md">${mdToPreviewHtml(md)}</div>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sm yellow" data-act="report-export">⬇ 导出 Markdown</button>
