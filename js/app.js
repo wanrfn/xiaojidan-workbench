@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20260930b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20261009a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -1712,57 +1712,39 @@ function openReport() {
     <div class="row" id="repTypes">
       ${types.map(([v, l]) => `<button class="btn sm" data-act="report-gen" data-range="${v}">${l}</button>`).join('')}
     </div>
-    <div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap">
-      <span class="ch-sub">自定义区间：</span>
+    <p style="color:var(--ink-soft);font-size:13px;margin:14px 0 6px"><strong>🔎 各范围工作汇总</strong>：统计这段时间在<strong>某个范围</strong>（或全部范围）做了哪些事，按工作性质分条列出，同样可导出 Word。</p>
+    <div class="row" id="repScopeBtns">
+      ${SCOPE_ORDER_ALL.map(s => `<button class="btn sm ghost" data-act="report-gen-scope" data-scope="${s}">${SCOPE_TITLE[s] || (s + '工作')}</button>`).join('')}
+      <button class="btn sm ghost" data-act="report-gen-scope" data-scope="__all__">全部（总览）</button>
+    </div>
+    <div class="row" style="margin-top:12px;align-items:center;flex-wrap:wrap">
+      <span class="ch-sub">或自定义区间：</span>
       <label>起 <input type="date" class="field" id="repS" value="${monthStart}" style="width:150px"></label>
       <label>止 <input type="date" class="field" id="repE" value="${monthEnd}" style="width:150px"></label>
-      <button class="btn primary sm" data-act="report-gen-custom">生成</button>
+      <button class="btn primary sm" data-act="report-gen-custom">生成完整报告</button>
+      <span class="ch-sub" style="margin-left:2px">↑ 上面 5 个按钮也按这对日期算</span>
     </div>
     <div id="repOut" style="margin-top:10px"></div>`);
   // 防止点日期控件时冒泡误触关闭弹窗
   ['repS', 'repE'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
-function genReport(range, custom) {
-  let r, label, hd;
-  if (range === 'custom') {
-    if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
-    r = { s: custom.s, e: custom.e }; label = '工作汇报';
-    hd = { work: '本期工作', plan: '下阶段工作计划与目标' };
-  } else {
-    r = dateRange(range);
-    const M = {
-      week:    { title: '工作周报', work: '本周工作', plan: '下周工作计划与目标' },
-      half:    { title: '工作半月报', work: '本期工作', plan: '下阶段工作计划与目标' },
-      month:   { title: '工作月报', work: '本月工作', plan: '下月工作计划与目标' },
-      quarter: { title: '工作季报', work: '本季工作', plan: '下季工作计划与目标' },
-      year:    { title: '工作年报', work: '本年工作', plan: '明年工作计划与目标' },
-    };
-    label = M[range].title; hd = { work: M[range].work, plan: M[range].plan };
-  }
-  if (!r) { toast('区间无效'); return; }
+/* 范围标题 & 固定展示顺序：科室 → 组内 → 部门 → 外部（科室工作排在最前，用户明确要求） */
+const SCOPE_TITLE = { '科室': '科室工作', '组内': '小组工作', '部门': '部门工作', '外部': '外部工作' };
+const SCOPE_ORDER_ALL = ['科室', '组内', '部门', '外部'];
+
+/* 取某区间的全部待办（带 date / scope / cat / text / done） */
+function collectTodos(s, e) {
   const all = [];
   Object.keys(state.work.todos).forEach(d => {
-    if (d >= r.s && d <= r.e) state.work.todos[d].forEach(t => all.push(Object.assign({ date: d }, t)));
+    if (d >= s && d <= e) state.work.todos[d].forEach(t => all.push(Object.assign({ date: d }, t)));
   });
   all.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-  const done = all.filter(t => t.done).length;
-  const rate = all.length ? Math.round(done / all.length * 100) : 0;
-  const open = all.filter(t => !t.done);
-  const days = new Set(all.map(t => t.date)).size;
-
-  const L = [];
-  L.push(`# ${label}`);
-  L.push('');
-  L.push(`> 统计区间：**${r.s} 至 ${r.e}**　|　共 ${days} 天有记录`);
-  L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
-  L.push('');
-  if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
-  else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
-  L.push('');
-  /* —— 二级汇总工具：把一批待办按「工作性质」分组，同性质下重复内容只保留一条 ——
-     归一化：去掉所有空白 + 去掉末尾标点 + 转小写（中英混排也能命中重复） */
+  return all;
+}
+/* 报告内的通用分组工具（去空白/末尾标点后判重，同性质同范围只留一条） */
+function reportTools() {
   const normKey = s => String(s == null ? '' : s).replace(/\s+/g, '')
-    .replace(/[。．.；;，,、！!？?~～,]+$/g, '').toLowerCase();
+    .replace(/[。．.；;，,、！!？?~～]+$/g, '').toLowerCase();
   const CAT_RANK = {}; CATS.forEach((c, i) => { CAT_RANK[c] = i; });
   const catRankOf = c => (c === '未分类' ? 999 : (CAT_RANK[c] == null ? CATS.length : CAT_RANK[c]));
   const groupByCat = list => {
@@ -1780,46 +1762,123 @@ function genReport(range, custom) {
     return order.sort((a, b) => catRankOf(a) - catRankOf(b) || a.localeCompare(b, 'zh'))
       .map(c => ({ cat: c, list: map[c] }));
   };
-  const pushCatGroups = (groups, lv) => groups.forEach(g => {
+  const pushCatGroups = (L, groups, lv) => groups.forEach(g => {
     L.push('#'.repeat(lv || 4) + ` ${g.cat}`);
     g.list.forEach(txt => L.push(`- ${txt}`));
     L.push('');
   });
+  const scopeTitleOf = s => SCOPE_TITLE[s] || (s + '工作');
+  const scopeOrderOf = all => [...SCOPE_ORDER_ALL,
+    ...new Set(all.map(t => t.scope).filter(s => s && !SCOPE_ORDER_ALL.includes(s)))];
+  const byScopeOf = all => {
+    const byScope = {};
+    all.forEach(t => { const s = t.scope || SCOPES[0]; (byScope[s] = byScope[s] || []).push(t); });
+    return byScope;
+  };
+  return { normKey, catRankOf, groupByCat, pushCatGroups, scopeTitleOf, scopeOrderOf, byScopeOf };
+}
+function genReport(range, custom) {
+  let r, label, hd;
+  const only = (range === 'scope' && custom && custom.scope && custom.scope !== '__all__') ? custom.scope : '';
+  const T = reportTools();
+  if (range === 'custom') {
+    if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
+    r = { s: custom.s, e: custom.e }; label = '工作汇报';
+    hd = { work: '本期工作', plan: '下阶段工作计划与目标' };
+  } else if (range === 'scope') {
+    if (!custom || !custom.s || !custom.e) { toast('请选择起止日期'); return; }
+    r = { s: custom.s, e: custom.e };
+    label = (only ? (SCOPE_TITLE[only] || (only + '工作')) : '各范围工作') + '汇总';
+    hd = { work: '本期工作', plan: '下阶段工作计划与目标' };
+  } else {
+    r = dateRange(range);
+    const M = {
+      week:    { title: '工作周报', work: '本周工作', plan: '下周工作计划与目标' },
+      half:    { title: '工作半月报', work: '本期工作', plan: '下阶段工作计划与目标' },
+      month:   { title: '工作月报', work: '本月工作', plan: '下月工作计划与目标' },
+      quarter: { title: '工作季报', work: '本季工作', plan: '下季工作计划与目标' },
+      year:    { title: '工作年报', work: '本年工作', plan: '明年工作计划与目标' },
+    };
+    label = M[range].title; hd = { work: M[range].work, plan: M[range].plan };
+  }
+  if (!r) { toast('区间无效'); return; }
+  const all = collectTodos(r.s, r.e);
+  const done = all.filter(t => t.done).length;
+  const rate = all.length ? Math.round(done / all.length * 100) : 0;
+  const open = all.filter(t => !t.done);
+  const days = new Set(all.map(t => t.date)).size;
+  const byScope = T.byScopeOf(all);
+  const pct = n => all.length ? Math.round(n / all.length * 100) + '%' : '—';
+
+  const L = [];
+  L.push(`# ${label}`);
+  L.push('');
+  L.push(`> 统计区间：**${r.s} 至 ${r.e}**　|　共 ${days} 天有记录`
+    + (only ? `　|　范围：**${T.scopeTitleOf(only)}**` : ''));
+  L.push('> 自动汇总自「小煎蛋的工作台 · 工作」分栏');
+  L.push('');
+  /* 单范围汇总：只在顶部报该范围的量，不报整体完成率（避免读起来像是全部工作） */
+  if (only) {
+    const mine = byScope[only] || [];
+    const d1 = mine.filter(t => t.done).length;
+    const r1 = mine.length ? Math.round(d1 / mine.length * 100) : 0;
+    if (mine.length) L.push(`${T.scopeTitleOf(only)}在这段时间共记录 ${mine.length} 项，完成 ${d1} 项（完成率 ${r1}%）。`);
+    else L.push(`这段时间没有${T.scopeTitleOf(only)}的记录。`);
+  } else {
+    if (all.length) L.push(`本期共记录 ${all.length} 项任务，完成 ${done} 项（完成率 ${rate}%）。`);
+    else L.push('该区间暂无任何工作记录，先去「工作」分栏记几笔吧。');
+  }
+  L.push('');
   // 4. 本期工作：一级 = 归属范围（科室/小组/部门…），二级 = 工作性质（日常管理…），只列内容，不列日期与范围
   L.push(`## 4.${hd.work}`);
   L.push('');
-  const SCOPE_TITLE = { '科室': '科室工作', '组内': '小组工作', '部门': '部门工作', '外部': '外部工作' };
-  const SCOPE_ORDER = ['科室', '组内', '部门', '外部'];   // 科室工作 排在 小组工作 之前
-  const scopeOrder = [...SCOPE_ORDER, ...new Set(all.map(t => t.scope).filter(s => s && !SCOPE_ORDER.includes(s)))];
-  const byScope = {};
-  all.forEach(t => { const s = t.scope || SCOPES[0]; (byScope[s] = byScope[s] || []).push(t); });
+  const scopeOrder = T.scopeOrderOf(all).filter(s => !only || s === only);
   scopeOrder.forEach(s => {
     const items = byScope[s]; if (!items || !items.length) return;
-    const groups = groupByCat(items);
+    const groups = T.groupByCat(items);
     if (!groups.length) return;
-    L.push(`### ${SCOPE_TITLE[s] || (s + '工作')}`);
+    L.push(`### ${T.scopeTitleOf(s)}`);
     L.push('');
-    pushCatGroups(groups);
+    T.pushCatGroups(L, groups);
   });
   if (!scopeOrder.some(s => (byScope[s] || []).some(t => String(t.text || '').trim()))) L.push('- （本期暂无记录）');
   // 5. 下周/下阶段工作计划与目标（未完成事项自动转化为计划，同样按工作性质二级汇总）
   L.push(`## 5.${hd.plan}`);
   L.push('');
-  const openGroups = groupByCat(open);
-  if (openGroups.length) pushCatGroups(openGroups, 3);
+  const openList = only ? open.filter(t => (t.scope || SCOPES[0]) === only) : open;
+  const openGroups = T.groupByCat(openList);
+  if (openGroups.length) T.pushCatGroups(L, openGroups, 3);
   else if (all.length) L.push('- （本期任务已全部完成，可在此补充新目标）');
   else L.push('- （本期暂无计划）');
   const md = L.join('\n');
 
   lastReport = { md, name: `工作汇报_${label}_${r.s}_${r.e}.md`, docxName: `工作汇报_${label}_${r.s}_${r.e}.docx` };
+  /* 顶部统计：单范围时只显示该范围的数字；总览时显示 4 个范围的任务数 */
+  const statRow = only
+    ? (() => {
+        const mine = byScope[only] || [];
+        const d1 = mine.filter(t => t.done).length;
+        return `
+        <div class="stat"><div class="num">${mine.length}</div><div class="lab">${SCOPE_TITLE[only] || (only + '工作')} 任务</div></div>
+        <div class="stat"><div class="num">${mine.length ? Math.round(d1 / mine.length * 100) : 0}%</div><div class="lab">完成率</div></div>
+        <div class="stat"><div class="num">${d1}</div><div class="lab">已完成</div></div>
+        <div class="stat"><div class="num">${mine.length - d1}</div><div class="lab">待跟进</div></div>`;
+      })()
+    : `
+      <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
+      <div class="stat"><div class="num">${rate}%</div><div class="lab">完成率</div></div>
+      <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
+      <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>`;
+  const scopeBar = all.length ? `
+      <div class="rep-scope-bar">${
+        SCOPE_ORDER_ALL.filter(s => (byScope[s] || []).length).map(s =>
+          `<span class="rep-scope-tag"><b>${SCOPE_TITLE[s]}</b> ${(byScope[s] || []).length} 项 · 完成 ${pct((byScope[s] || []).filter(t => t.done).length)}</span>`
+        ).join('')
+      }</div>` : '';
   const outHtml = `
     <div class="report-summary">
-      <div class="stat-row">
-        <div class="stat"><div class="num">${all.length}</div><div class="lab">任务总数</div></div>
-        <div class="stat"><div class="num">${rate}%</div><div class="lab">完成率</div></div>
-        <div class="stat"><div class="num">${done}</div><div class="lab">已完成</div></div>
-        <div class="stat"><div class="num">${open.length}</div><div class="lab">待跟进</div></div>
-      </div>
+      <div class="stat-row">${statRow}</div>
+      ${scopeBar}
       <p style="color:var(--ink-soft);font-size:13px;margin:10px 0">区间 ${r.s} ~ ${r.e}，共 ${days} 天有记录。内容先按「科室工作 / 小组工作 / 部门工作」分组，再按工作性质（如「日常管理」）二次汇总，逐条列出（不带日期），重复内容只保留一条 → 5.下周/下阶段工作计划（未完成事项自动转为计划）。可导出 Markdown 或 Word(.docx)。</p>
       <div class="report-md">${mdToPreviewHtml(md)}</div>
     </div>
@@ -1839,6 +1898,11 @@ function handleReport(act, el) {
     const s = $('#repS').value, e = $('#repE').value;
     if (!s || !e) { toast('请选择起止日期'); return; }
     genReport('custom', { s, e });
+  }
+  else if (act === 'report-gen-scope') {
+    const s = $('#repS').value, e = $('#repE').value;
+    if (!s || !e) { toast('请选择起止日期'); return; }
+    genReport('scope', { s, e, scope: el.dataset.scope || '' });
   }
   else if (act === 'report-copy') {
     const payload = $('#repOut').dataset.payload || '';
@@ -2459,7 +2523,7 @@ $('#view').addEventListener('click', e => {
   }
   else if (act === 'team-show-rules') { state.team.activeTab = 'rules'; save(); renderTeam(); }
   else if (act === 'report-open') openReport();
-  else if (['report-gen', 'report-gen-custom', 'report-copy', 'report-export', 'report-export-docx'].includes(act)) handleReport(act, el);
+  else if (['report-gen', 'report-gen-custom', 'report-gen-scope', 'report-copy', 'report-export', 'report-export-docx'].includes(act)) handleReport(act, el);
   else if (act === 'quiz-open') { openQuiz(); }
   else if (act === 'know-filter') { knowFilter = el.dataset.tag; viewFinance($('#view')); }
   else if (act === 'recipe-filter') { recipeFilter = el.dataset.meal; viewRecipes($('#view')); }
