@@ -73,14 +73,19 @@ input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink);}
 .hamb{display:none; font-size:22px; width:40px;height:40px;border-radius:12px;background:#fff;box-shadow:var(--shadow-sm);}
 .topbar-title h1{margin:0; font-size:22px; font-weight:800;}
 .page-date{margin:2px 0 0; font-size:13px; color:var(--ink-soft);}
-/* 财务月下面那行「本周晚班」 */
-.page-date .pg-night{display:inline-block; margin-top:4px; font-size:11.5px; color:var(--ink-soft);
+/* 财务月下面那几行附加信息（本周晚班 / 本月 release 共用） */
+.page-date .pg-line{display:inline-block; margin-top:4px; font-size:11.5px; color:var(--ink-soft);
   cursor:pointer; border-bottom:1px dashed transparent; line-height:1.5;}
-.page-date .pg-night:hover{border-bottom-color:var(--line-strong);}
-.page-date .pg-night b{color:var(--green-500); font-weight:800;}
-.page-date .pg-night-date{color:var(--ink-faint);}
-.page-date .pg-night-sep{color:var(--ink-faint);}
-.page-date .pg-night-none{color:var(--ink-faint);}
+.page-date .pg-line:hover{border-bottom-color:var(--line-strong);}
+.page-date .pg-line b{color:var(--green-500); font-weight:800;}
+.page-date .pg-sub{color:var(--ink-faint);}
+.page-date .pg-sep{color:var(--ink-faint);}
+.page-date .pg-none{color:var(--ink-faint);}
+/* 本月 release：未来最近一次加粗 + 绿色小圆点标记 */
+.page-date .pg-rel{color:var(--ink-soft);}
+.page-date .pg-rel.is-next{color:var(--ink); font-weight:800;}
+.page-date .pg-rel.is-next::after{content:''; display:inline-block; width:5px; height:5px;
+  border-radius:50%; background:var(--green-500); margin-left:4px; vertical-align:middle;}
 /* 晚班排班弹窗 */
 .ns-list{margin:2px 0 10px;}
 .ns-row{display:flex; align-items:center; gap:10px; padding:7px 0;
