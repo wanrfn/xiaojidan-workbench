@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20261009a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20261021a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -270,6 +270,11 @@ function seed() {
       { id: 'fresh', name: '新鲜玩意', icon: '✨', core: true },
     ],
     work: { todos: {} },
+    /* 晚班排班：每条一个日期区间 + 职能 + 人员，首页顶部显示「本自然周」命中的那些 */
+    nightShift: [
+      { id: 'ns1', start: '2026-10-19', end: '2026-10-23', team: 'Layout', names: 'Brett Peng，Suzanne Li' },
+      { id: 'ns2', start: '2026-10-26', end: '2026-10-30', team: 'QC', names: 'Griffin Lou' },
+    ],
     english: { checkins: {}, subs: {}, vocabMastered: [] },
     finance: { knowledge: SAMPLE_KNOWLEDGE.slice(), reads: [] },
     recipes: { favs: [], dailySeed: {} },
@@ -310,6 +315,8 @@ function load() {
       finance: Object.assign(base.finance, s.finance),
       recipes: Object.assign(base.recipes, s.recipes),
       fresh: Object.assign(base.fresh, s.fresh),
+      // 老存档没有 nightShift 字段（或存坏了）→ 回落到种子里的初始排班
+      nightShift: Array.isArray(s.nightShift) ? s.nightShift : base.nightShift,
       team: Object.assign(base.team, s.team || {}),
       settings: Object.assign(base.settings, s.settings || {}, {
         sync: Object.assign(base.settings.sync, (s.settings && s.settings.sync) || {}),
@@ -356,11 +363,68 @@ function finPeriodStr(d) {
   else { start = new Date(dt.getFullYear(), dt.getMonth() - 1, 15); end = new Date(dt.getFullYear(), dt.getMonth(), 14); }
   return `${fmtFin(start)} – ${fmtFin(end)}`;
 }
+/* ---------- 晚班人员（按日期区间排班，首页顶部显示本自然周） ---------- */
+function nightList() {
+  return (Array.isArray(state.nightShift) ? state.nightShift : [])
+    .filter(x => x && x.start && x.end)
+    .slice().sort((a, b) => a.start < b.start ? -1 : a.start > b.start ? 1 : 0);
+}
+/* '2026-10-19' → '10.19'；区间 → '10.19–10.23' */
+function mdDay(s) { return s ? s.slice(5).replace('-', '.') : ''; }
+function mdRange(x) { return `${mdDay(x.start)}–${mdDay(x.end)}`; }
+/* 命中「本自然周（周一~周日）」的排班：区间与本周有重叠就算（这样周六/日也不会突然空掉） */
+function nightThisWeek(d) {
+  const ms = mondayStr(d), me = sundayStr(d);
+  return nightList().filter(x => x.start <= me && x.end >= ms);
+}
+/* 本周之后最近的一条（用于本周没排班时的提示） */
+function nightNext(d) {
+  const t = todayStr(d);
+  return nightList().filter(x => x.start > t)[0] || null;
+}
+/* 顶部那行文字（HTML） */
+function nightLineHtml(d) {
+  const cur = nightThisWeek(d);
+  const inner = cur.length
+    ? cur.map(x => `<b>${esc(x.team || '—')}</b> · ${esc(x.names || '—')}`
+        + `<span class="pg-night-date">（${mdRange(x)}）</span>`).join('<span class="pg-night-sep">；</span>')
+    : `<span class="pg-night-none">未排班</span>` + (() => {
+        const nx = nightNext(d);
+        return nx ? `<span class="pg-night-date">（下次 ${mdRange(nx)} · ${esc(nx.team || '')}）</span>` : '';
+      })();
+  return `🌙 本周晚班：${inner}`;
+}
+/* 维护晚班的弹窗 */
+function openNightShift() {
+  const list = nightList().slice().reverse();   // 新的排上面
+  const rows = list.length ? list.map(x => `
+      <div class="ns-row">
+        <span class="ns-date">${mdRange(x)}</span>
+        <span class="ns-team">${esc(x.team || '—')}</span>
+        <span class="ns-names">${esc(x.names || '—')}</span>
+        <button class="todo-del" data-act="night-del" data-id="${esc(x.id)}" title="删除这条">✕</button>
+      </div>`).join('')
+    : '<p style="color:var(--ink-faint);font-size:13px;margin:4px 0 10px">还没有排班记录，在下面添加一条。</p>';
+  openModal(`<h2>🌙 晚班排班</h2>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 10px">首页顶部（财务月下面）会显示<strong>本自然周</strong>的晚班人员。<br>点击那行文字就能回到这里维护，区间与本周有重叠即视为本周排班。</p>
+    <div class="ns-list">${rows}</div>
+    <div class="ns-form">
+      <div class="row">
+        <label>起</label><input type="date" class="field" id="nsStart" value="${mondayStr()}" style="width:148px">
+        <label>止</label><input type="date" class="field" id="nsEnd" value="${(() => { const x = new Date(mondayStr()); x.setDate(x.getDate() + 4); return dateStrOf(x); })()}" style="width:148px">
+      </div>
+      <div class="row"><label>职能</label><input class="field" id="nsTeam" placeholder="Layout / QC" style="flex:1;min-width:130px"></div>
+      <div class="row"><label>人员</label><input class="field" id="nsNames" placeholder="多人用逗号或顿号分隔" style="flex:1"></div>
+      <div class="row"><button class="btn primary" data-act="night-add">＋ 添加这条排班</button></div>
+    </div>`);
+  ['nsStart', 'nsEnd'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
+}
 function renderTopbar(title) {
   $('#pageTitle').textContent = title;
   const d = new Date();
   $('#pageDate').innerHTML = `${greet()} · ${todayStr(d)} ${WEEK[d.getDay()]}` +
-    `<br><span style="font-size:11.5px;color:var(--ink-soft)">📅 当前财务月：${finPeriodStr(d)}</span>`;
+    `<br><span style="font-size:11.5px;color:var(--ink-soft)">📅 当前财务月：${finPeriodStr(d)}</span>` +
+    `<br><span class="pg-night" data-act="night-edit" title="点击维护晚班排班">${nightLineHtml(d)}</span>`;
 }
 
 /* ---------- 导航栏 ---------- */
@@ -2248,6 +2312,11 @@ $('#nav').addEventListener('click', e => {
   if (item) go(item.dataset.id);
 });
 $('#hambBtn').addEventListener('click', () => { $('#sidebar').classList.add('open'); $('#scrim').classList.add('show'); });
+/* 顶部「本周晚班」那行点了就进排班维护（它在 #pageDate 里，不在 #view 内，得单独挂监听） */
+$('#pageDate').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  if (el.dataset.act === 'night-edit') openNightShift();
+});
 $('#scrim').addEventListener('click', () => { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show'); });
 $('#settingsBtn').addEventListener('click', openSettings);
 $('#addSectionBtn').addEventListener('click', () => {
@@ -2752,6 +2821,25 @@ $('#modalRoot').addEventListener('click', e => {
     return;
   }
   if (act === 'modal-close') { closeModal(); return; }
+  if (act === 'night-add') {
+    const s = ($('#nsStart').value || '').trim();
+    const e = ($('#nsEnd').value || '').trim();
+    const team = ($('#nsTeam').value || '').trim();
+    const names = ($('#nsNames').value || '').trim();
+    if (!s || !e) { toast('请选择起止日期'); return; }
+    if (e < s) { toast('结束日期不能早于开始日期'); return; }
+    if (!names) { toast('请填写晚班人员'); return; }
+    if (!Array.isArray(state.nightShift)) state.nightShift = [];
+    state.nightShift.push({ id: 'ns_' + uid(), start: s, end: e, team, names });
+    save(); openNightShift(); renderTopbar($('#pageTitle').textContent);
+    toast('已添加晚班排班'); return;
+  }
+  if (act === 'night-del') {
+    const id = el.dataset.id;
+    state.nightShift = (state.nightShift || []).filter(x => x.id !== id);
+    save(); openNightShift(); renderTopbar($('#pageTitle').textContent);
+    toast('已删除'); return;
+  }
   if (act === 'add-section-do') {
     const name = ($('#newName').value || '').trim();
     if (!name) { toast('请填写名称'); return; }
