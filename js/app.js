@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20261021a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20261021b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -275,6 +275,15 @@ function seed() {
       { id: 'ns1', start: '2026-10-19', end: '2026-10-23', team: 'Layout', names: 'Brett Peng，Suzanne Li' },
       { id: 'ns2', start: '2026-10-26', end: '2026-10-30', team: 'QC', names: 'Griffin Lou' },
     ],
+    /* Release 日期：公司排期表，首页顶部显示本月的那几期 + 截稿日 */
+    releaseDates: [
+      { id: 'rl1', release: '2026-10-14', type: 'SM', lastPub: '2026-10-08' },
+      { id: 'rl2', release: '2026-10-26', type: 'SM, M, BM', lastPub: '2026-10-21' },
+      { id: 'rl3', release: '2026-11-13', type: 'SM', lastPub: '2026-11-09' },
+      { id: 'rl4', release: '2026-11-25', type: 'SM, M', lastPub: '2026-11-20' },
+      { id: 'rl5', release: '2026-12-11', type: 'SM', lastPub: '2026-12-07' },
+      { id: 'rl6', release: '2026-12-24', type: 'SM, M, BM, Q, SA', lastPub: '2026-12-21' },
+    ],
     english: { checkins: {}, subs: {}, vocabMastered: [] },
     finance: { knowledge: SAMPLE_KNOWLEDGE.slice(), reads: [] },
     recipes: { favs: [], dailySeed: {} },
@@ -315,8 +324,9 @@ function load() {
       finance: Object.assign(base.finance, s.finance),
       recipes: Object.assign(base.recipes, s.recipes),
       fresh: Object.assign(base.fresh, s.fresh),
-      // 老存档没有 nightShift 字段（或存坏了）→ 回落到种子里的初始排班
+      // 老存档没有 nightShift / releaseDates 字段（或存坏了）→ 回落到种子里的初始数据
       nightShift: Array.isArray(s.nightShift) ? s.nightShift : base.nightShift,
+      releaseDates: Array.isArray(s.releaseDates) ? s.releaseDates : base.releaseDates,
       team: Object.assign(base.team, s.team || {}),
       settings: Object.assign(base.settings, s.settings || {}, {
         sync: Object.assign(base.settings.sync, (s.settings && s.settings.sync) || {}),
@@ -387,10 +397,10 @@ function nightLineHtml(d) {
   const cur = nightThisWeek(d);
   const inner = cur.length
     ? cur.map(x => `<b>${esc(x.team || '—')}</b> · ${esc(x.names || '—')}`
-        + `<span class="pg-night-date">（${mdRange(x)}）</span>`).join('<span class="pg-night-sep">；</span>')
-    : `<span class="pg-night-none">未排班</span>` + (() => {
+        + `<span class="pg-sub">（${mdRange(x)}）</span>`).join('<span class="pg-sep">；</span>')
+    : `<span class="pg-none">未排班</span>` + (() => {
         const nx = nightNext(d);
-        return nx ? `<span class="pg-night-date">（下次 ${mdRange(nx)} · ${esc(nx.team || '')}）</span>` : '';
+        return nx ? `<span class="pg-sub">（下次 ${mdRange(nx)} · ${esc(nx.team || '')}）</span>` : '';
       })();
   return `🌙 本周晚班：${inner}`;
 }
@@ -419,12 +429,65 @@ function openNightShift() {
     </div>`);
   ['nsStart', 'nsEnd'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
+/* ---------- Release 日期（每月几期，首页顶部显示本月） ----------
+   数据形态：{ id, release:'YYYY-MM-DD', type:'SM / M / BM…', lastPub:'YYYY-MM-DD' }
+   月份直接从 release 日期推导（公司排期表里 Release Day 一定落在同一自然月内） */
+function wdOf(ds) { return ds ? WEEK[new Date(ds + 'T00:00:00').getDay()] : ''; }
+function releaseList() {
+  return (Array.isArray(state.releaseDates) ? state.releaseDates : [])
+    .filter(x => x && x.release)
+    .slice().sort((a, b) => a.release < b.release ? -1 : a.release > b.release ? 1 : 0);
+}
+function releaseOfMonth(d) {
+  const mk = todayStr(d).slice(0, 7);
+  return releaseList().filter(x => x.release.slice(0, 7) === mk);
+}
+function releaseNextAfter(ds) { return releaseList().filter(x => x.release > ds)[0] || null; }
+function releaseLineHtml(d) {
+  const t = todayStr(d);
+  const cur = releaseOfMonth(d);
+  if (!cur.length) return '📦 本月 release：<span class="pg-none">暂无记录</span>';
+  const nxt = cur.filter(x => x.release >= t)[0] || null;
+  const inner = cur.map(x =>
+    `<span class="pg-rel${nxt && x.id === nxt.id ? ' is-next' : ''}">${mdDay(x.release)}（${wdOf(x.release)}`
+    + `${x.type ? ' · ' + esc(x.type) : ''}）</span>`).join('<span class="pg-sep"> · </span>');
+  const tail = nxt ? '' : (() => {
+    const nx = releaseNextAfter(t);
+    return nx ? `<span class="pg-sub">（下一个 ${mdDay(nx.release)} · ${esc(nx.type || '')}）</span>` : '';
+  })();
+  return `📦 本月 release：${inner}${tail}`;
+}
+/* 维护 release 日期的弹窗 */
+function openRelease() {
+  const list = releaseList();
+  const rows = list.length ? list.map(x => `
+      <div class="ns-row">
+        <span class="ns-date">${mdDay(x.release)}<span class="pg-sub"> ${wdOf(x.release)}</span></span>
+        <span class="ns-team">${esc(x.type || '—')}</span>
+        <span class="ns-names">${x.lastPub ? '<span class="pg-sub">截稿 ' + mdDay(x.lastPub) + '</span>' : ''}</span>
+        <button class="todo-del" data-act="rel-del" data-id="${esc(x.id)}" title="删除这条">✕</button>
+      </div>`).join('')
+    : '<p style="color:var(--ink-faint);font-size:13px;margin:4px 0 10px">还没有 release 日期，在下面添加一条。</p>';
+  openModal(`<h2>📦 Release 日期</h2>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 10px">首页顶部（晚班下面）显示<strong>本月</strong>的所有 release 日期，<strong>未来最近的一次会加粗</strong>。<br>点击那行文字随时回来维护；月份由 release 日期自动决定。</p>
+    <div class="ns-list">${rows}</div>
+    <div class="ns-form">
+      <div class="row">
+        <label>Release</label><input type="date" class="field" id="relDate" style="width:150px">
+        <label>截稿日</label><input type="date" class="field" id="relPub" style="width:150px">
+      </div>
+      <div class="row"><label>类型</label><input class="field" id="relType" placeholder="SM / SM, M / SM, M, BM…" style="flex:1;min-width:150px"></div>
+      <div class="row"><button class="btn primary" data-act="rel-add">＋ 添加这条 release</button></div>
+    </div>`);
+  ['relDate', 'relPub'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
+}
 function renderTopbar(title) {
   $('#pageTitle').textContent = title;
   const d = new Date();
   $('#pageDate').innerHTML = `${greet()} · ${todayStr(d)} ${WEEK[d.getDay()]}` +
     `<br><span style="font-size:11.5px;color:var(--ink-soft)">📅 当前财务月：${finPeriodStr(d)}</span>` +
-    `<br><span class="pg-night" data-act="night-edit" title="点击维护晚班排班">${nightLineHtml(d)}</span>`;
+    `<br><span class="pg-line" data-act="night-edit" title="点击维护晚班排班">${nightLineHtml(d)}</span>` +
+    `<br><span class="pg-line" data-act="release-edit" title="点击维护 release 日期">${releaseLineHtml(d)}</span>`;
 }
 
 /* ---------- 导航栏 ---------- */
@@ -2312,10 +2375,11 @@ $('#nav').addEventListener('click', e => {
   if (item) go(item.dataset.id);
 });
 $('#hambBtn').addEventListener('click', () => { $('#sidebar').classList.add('open'); $('#scrim').classList.add('show'); });
-/* 顶部「本周晚班」那行点了就进排班维护（它在 #pageDate 里，不在 #view 内，得单独挂监听） */
+/* 顶部「本周晚班 / 本月 release」那两行点了就进维护（它们在 #pageDate 里，不在 #view 内，得单独挂监听） */
 $('#pageDate').addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (el.dataset.act === 'night-edit') openNightShift();
+  else if (el.dataset.act === 'release-edit') openRelease();
 });
 $('#scrim').addEventListener('click', () => { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show'); });
 $('#settingsBtn').addEventListener('click', openSettings);
@@ -2838,6 +2902,24 @@ $('#modalRoot').addEventListener('click', e => {
     const id = el.dataset.id;
     state.nightShift = (state.nightShift || []).filter(x => x.id !== id);
     save(); openNightShift(); renderTopbar($('#pageTitle').textContent);
+    toast('已删除'); return;
+  }
+  if (act === 'rel-add') {
+    const rel = ($('#relDate').value || '').trim();
+    const pub = ($('#relPub').value || '').trim();
+    const type = ($('#relType').value || '').trim();
+    if (!rel) { toast('请选择 release 日期'); return; }
+    if (pub && pub > rel) { toast('截稿日不能晚于 release 日期'); return; }
+    if (!Array.isArray(state.releaseDates)) state.releaseDates = [];
+    if (state.releaseDates.some(x => x && x.release === rel)) { toast('这个 release 日期已经有了'); return; }
+    state.releaseDates.push({ id: 'rl_' + uid(), release: rel, type, lastPub: pub });
+    save(); openRelease(); renderTopbar($('#pageTitle').textContent);
+    toast('已添加 release 日期'); return;
+  }
+  if (act === 'rel-del') {
+    const id = el.dataset.id;
+    state.releaseDates = (state.releaseDates || []).filter(x => x.id !== id);
+    save(); openRelease(); renderTopbar($('#pageTitle').textContent);
     toast('已删除'); return;
   }
   if (act === 'add-section-do') {
