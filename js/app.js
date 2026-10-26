@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const KEY = 'xiaojidan_workbench_v1';
-const APP_VERSION = '20261021b'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
+const APP_VERSION = '20261026a'; // 缓存破版本号：每次改 JS 必须递增，并同步 index.html 的 ?v=
 
 const todayStr = (d = new Date()) => {
   const z = n => String(n).padStart(2, '0');
@@ -284,6 +284,8 @@ function seed() {
       { id: 'rl5', release: '2026-12-11', type: 'SM', lastPub: '2026-12-07' },
       { id: 'rl6', release: '2026-12-24', type: 'SM, M, BM, Q, SA', lastPub: '2026-12-21' },
     ],
+    /* 对接期刊-消息通知负责人：三人按自然周轮换；anchor = 第 1 个人所在那周的周一（固定字面量） */
+    noticeRotation: { names: ['Verina Li', 'Ambrose Fan', 'Essie Guo'], anchor: '2026-10-26' },
     english: { checkins: {}, subs: {}, vocabMastered: [] },
     finance: { knowledge: SAMPLE_KNOWLEDGE.slice(), reads: [] },
     recipes: { favs: [], dailySeed: {} },
@@ -324,9 +326,11 @@ function load() {
       finance: Object.assign(base.finance, s.finance),
       recipes: Object.assign(base.recipes, s.recipes),
       fresh: Object.assign(base.fresh, s.fresh),
-      // 老存档没有 nightShift / releaseDates 字段（或存坏了）→ 回落到种子里的初始数据
+      // 老存档没有 nightShift / releaseDates / noticeRotation 字段（或存坏了）→ 回落到种子里的初始数据
       nightShift: Array.isArray(s.nightShift) ? s.nightShift : base.nightShift,
       releaseDates: Array.isArray(s.releaseDates) ? s.releaseDates : base.releaseDates,
+      noticeRotation: (s.noticeRotation && Array.isArray(s.noticeRotation.names) && s.noticeRotation.names.length)
+        ? s.noticeRotation : base.noticeRotation,
       team: Object.assign(base.team, s.team || {}),
       settings: Object.assign(base.settings, s.settings || {}, {
         sync: Object.assign(base.settings.sync, (s.settings && s.settings.sync) || {}),
@@ -481,13 +485,61 @@ function openRelease() {
     </div>`);
   ['relDate', 'relPub'].forEach(id => { const el = $('#' + id); if (el) el.addEventListener('click', e => e.stopPropagation()); });
 }
+/* ---------- 对接期刊 · 消息通知负责人（按自然周轮换，周一起算） ----------
+   三个人按顺序循环；anchor 是「第 1 个人所在那周的周一」。
+   ⚠️ anchor 必须是**固定字面量**，不能用 mondayStr() 现算 —— 否则每周重新取一次，
+   永远停在第 1 个人身上。 */
+const NOTICE_DEFAULT = ['Verina Li', 'Ambrose Fan', 'Essie Guo'];
+const NOTICE_ANCHOR = '2026-10-26';   // 这一周 = NOTICE_DEFAULT[0]
+function noticeCfg() {
+  const c = (state.noticeRotation && typeof state.noticeRotation === 'object') ? state.noticeRotation : {};
+  const names = (Array.isArray(c.names) ? c.names : []).map(x => String(x == null ? '' : x).trim()).filter(Boolean);
+  return { names: names.length ? names : NOTICE_DEFAULT.slice(), anchor: c.anchor || NOTICE_ANCHOR };
+}
+function weeksBetweenMon(a, b) {
+  return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 604800000);
+}
+/* off = 0 本周 / 1 下周 / 2 下下周…；取负可以用来回看往周 */
+function noticeForWeek(d, off) {
+  const { names, anchor } = noticeCfg();
+  const mon = new Date(mondayStr(d) + 'T00:00:00');
+  mon.setDate(mon.getDate() + 7 * (off || 0));
+  const n = names.length;
+  const idx = weeksBetweenMon(anchor, dateStrOf(mon));
+  return names[((idx % n) + n) % n];
+}
+function noticeLineHtml(d) {
+  const labels = ['本周', '下周', '下下周'];
+  const inner = labels.map((lb, i) => {
+    const nm = noticeForWeek(d, i);
+    return `${lb} ${i === 0 ? `<b>${esc(nm)}</b>` : esc(nm)}`;
+  }).join('<span class="pg-sep"> · </span>');
+  return `📨 消息通知负责人：${inner}`;
+}
+/* 维护轮换名单 */
+function openNotice() {
+  const { names, anchor } = noticeCfg();
+  const slots = [0, 1, 2].map(i => `
+      <div class="row"><label style="min-width:52px">第 ${i + 1} 位</label>
+        <input class="field" id="ntName${i}" value="${esc(names[i] || '')}" placeholder="未填写" style="flex:1;min-width:160px"></div>`).join('');
+  openModal(`<h2>📨 消息通知负责人</h2>
+    <p style="color:var(--ink-soft);font-size:13px;margin:0 0 10px">首页顶部显示<strong>本周 / 下周 / 下下周</strong>的负责人，按自然周（周一起）轮换。<br>
+      三人按下面顺序循环，起点是 <strong>${anchor}</strong> 那一周（对应第 1 位）。当前为 <strong>${esc(noticeForWeek(new Date(), 0))}</strong>。</p>
+    ${slots}
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="btn primary" data-act="notice-save">保存</button>
+      <button class="btn sm ghost" data-act="notice-reanchor">以本周为第 1 位重新开始</button>
+    </div>
+    <p style="color:var(--ink-faint);font-size:12px;margin:8px 0 0">改名后点「保存」；如果有人加入/离开、想让轮换从本周重新排，再点右边那个按钮。</p>`);
+}
 function renderTopbar(title) {
   $('#pageTitle').textContent = title;
   const d = new Date();
   $('#pageDate').innerHTML = `${greet()} · ${todayStr(d)} ${WEEK[d.getDay()]}` +
     `<br><span style="font-size:11.5px;color:var(--ink-soft)">📅 当前财务月：${finPeriodStr(d)}</span>` +
     `<br><span class="pg-line" data-act="night-edit" title="点击维护晚班排班">${nightLineHtml(d)}</span>` +
-    `<br><span class="pg-line" data-act="release-edit" title="点击维护 release 日期">${releaseLineHtml(d)}</span>`;
+    `<br><span class="pg-line" data-act="release-edit" title="点击维护 release 日期">${releaseLineHtml(d)}</span>` +
+    `<br><span class="pg-line" data-act="notice-edit" title="点击维护消息通知负责人">${noticeLineHtml(d)}</span>`;
 }
 
 /* ---------- 导航栏 ---------- */
@@ -2380,6 +2432,7 @@ $('#pageDate').addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (el.dataset.act === 'night-edit') openNightShift();
   else if (el.dataset.act === 'release-edit') openRelease();
+  else if (el.dataset.act === 'notice-edit') openNotice();
 });
 $('#scrim').addEventListener('click', () => { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('show'); });
 $('#settingsBtn').addEventListener('click', openSettings);
@@ -2921,6 +2974,22 @@ $('#modalRoot').addEventListener('click', e => {
     state.releaseDates = (state.releaseDates || []).filter(x => x.id !== id);
     save(); openRelease(); renderTopbar($('#pageTitle').textContent);
     toast('已删除'); return;
+  }
+  if (act === 'notice-save') {
+    const names = [0, 1, 2].map(i => { const n = $('#ntName' + i); return n ? String(n.value || '').trim() : ''; })
+      .filter(Boolean);
+    if (!names.length) { toast('至少填一个人'); return; }
+    const cur = state.noticeRotation && state.noticeRotation.anchor ? state.noticeRotation.anchor : NOTICE_ANCHOR;
+    state.noticeRotation = { names, anchor: cur };
+    save(); closeModal(); renderTopbar($('#pageTitle').textContent);
+    toast('已保存轮换名单'); return;
+  }
+  if (act === 'notice-reanchor') {
+    const names = [0, 1, 2].map(i => { const n = $('#ntName' + i); return n ? String(n.value || '').trim() : ''; })
+      .filter(Boolean);
+    state.noticeRotation = { names: names.length ? names : NOTICE_DEFAULT.slice(), anchor: mondayStr() };
+    save(); closeModal(); renderTopbar($('#pageTitle').textContent);
+    toast('已从本周（' + mondayStr() + '）重新开始轮换'); return;
   }
   if (act === 'add-section-do') {
     const name = ($('#newName').value || '').trim();
